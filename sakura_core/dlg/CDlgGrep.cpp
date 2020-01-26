@@ -28,6 +28,7 @@
 #include "util/window.h"
 #include "env/DLLSHAREDATA.h"
 #include "env/CSakuraEnvironment.h"
+#include "extmodule/CRipgrep.h"
 #include "sakura_rc.h"
 #include "sakura.hh"
 
@@ -61,6 +62,7 @@ const DWORD p_helpids[] = {	//12000
 	IDC_CHECK_FILE_ONLY,			HIDC_CHECK_FILE_ONLY,				//ファイル毎最初のみ検索
 	IDC_CHECK_BASE_PATH,			HIDC_CHECK_BASE_PATH,				//ベースフォルダ表示
 	IDC_CHECK_SEP_FOLDER,			HIDC_CHECK_SEP_FOLDER,				//フォルダ毎に表示
+	IDC_CHK_USERIPGREP, 			HIDC_CHK_USERIPGREP,				//ripgrepを使う
 //	IDC_STATIC,						-1,
 	0, 0
 };	//@@@ 2002.01.07 add end MIK
@@ -454,6 +456,18 @@ BOOL CDlgGrep::OnBnClicked( int wID )
 			::EnableWindow( GetItemHwnd( IDC_CHECK_SEP_FOLDER ),TRUE );
 		}
 		break;
+	case IDC_CHK_USERIPGREP:
+		//TODO リファクタ
+		//そもそもrg.exeがいなかったらこのチェックボタンをグレーアウトしておきたい
+		if ( ::IsDlgButtonChecked(GetHwnd(), IDC_CHK_USERIPGREP) ) {
+			//TODO 実装予定
+			//ripgrepで対応していない機能のグレーアウト
+			::EnableWindow(GetItemHwnd(IDC_CHK_SUBFOLDER), FALSE); //サブフォルダから検索
+		}else {
+			//グレーアウトの解除
+			::EnableWindow(GetItemHwnd(IDC_CHK_SUBFOLDER), TRUE); //サブフォルダから検索
+		}
+		break;
 	case IDOK:
 		/* ダイアログデータの取得 */
 		if( GetData() ){
@@ -604,6 +618,16 @@ void CDlgGrep::SetData( void )
 	// フォルダの初期値をカレントフォルダにする
 	::CheckDlgButton( GetHwnd(), IDC_CHK_DEFAULTFOLDER, m_pShareData->m_Common.m_sSearch.m_bGrepDefaultFolder );
 
+	//ripgrepが使えるか
+	if (CanRipgrep()) {
+		::EnableWindow(GetItemHwnd(IDC_CHK_USERIPGREP), true);
+		::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_sSearchOption.bUseRipgrep);
+	}
+	else {
+		::EnableWindow(GetItemHwnd(IDC_CHK_USERIPGREP), false);
+		::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, false);
+	}
+
 	return;
 }
 
@@ -655,6 +679,9 @@ int CDlgGrep::GetData( void )
 
 	/* 正規表現 */
 	m_sSearchOption.bRegularExp = (0!=::IsDlgButtonChecked( GetHwnd(), IDC_CHK_REGULAREXP ));
+
+	/* ripgrepを使う */
+	m_sSearchOption.bUseRipgrep = (0!=::IsDlgButtonChecked( GetHwnd(), IDC_CHK_USERIPGREP ));
 
 	/* 文字コード自動判別 */
 //	m_bKanjiCode_AutoDetect = ::IsDlgButtonChecked( GetHwnd(), IDC_CHK_KANJICODEAUTODETECT );

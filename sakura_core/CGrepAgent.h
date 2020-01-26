@@ -102,6 +102,38 @@ public:
 	);
 
 private:
+	// Grep実行(ripgrep)
+	DWORD DoGrepRipgrep(
+		CEditView* pcViewDst,
+		const CNativeW* pcmGrepKey,
+		const CNativeW* pcmGrepFolder,
+		const SSearchOption& sSearchOption
+	);
+	// Grep実行(sakura)
+	DWORD DoGrepSakura(
+		CEditView* pcViewDst,
+		bool					bGrepReplace,
+		const CNativeW* pcmGrepKey,
+		const CNativeW* pcmGrepReplace,
+		const CNativeW* pcmGrepFile,
+		const CNativeW* pcmGrepFolder,
+		const CNativeW* pcmExcludeFile,
+		const CNativeW* pcmExcludeFolder,
+		bool					bGrepCurFolder,
+		BOOL					bGrepSubFolder,
+		bool					bGrepStdout,
+		bool					bGrepHeader,
+		const SSearchOption& sSearchOption,
+		ECodeType				nGrepCharSet,	// 2002/09/21 Moca 文字コードセット選択
+		int						nGrepOutputLineType,
+		int						nGrepOutputStyle,
+		bool					bGrepOutputFileOnly,	//!< [in] ファイル毎最初のみ出力
+		bool					bGrepOutputBaseFolder,	//!< [in] ベースフォルダ表示
+		bool					bGrepSeparateFolder,	//!< [in] フォルダ毎に表示
+		bool					bGrepPaste,
+		bool					bGrepBackup
+	);
+
 	// Grep実行
 	int DoGrepTree(
 		CEditView*				pcViewDst,

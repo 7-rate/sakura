@@ -23,6 +23,8 @@
 #include <deque>
 #include <memory>
 #include "sakura_rc.h"
+#include "env/CShareData.h"
+#include "util/tchar_template.h"
 
 #define UICHECK_INTERVAL_MILLISEC 100	// UI確認の時間間隔
 #define ADDTAIL_INTERVAL_MILLISEC 50	// 結果出力の時間間隔
@@ -174,6 +176,389 @@ void CGrepAgent::AddTail( CEditView* pcEditView, const CNativeW& cmem, bool bAdd
 }
 
 /*! Grep実行
+*/
+DWORD CGrepAgent::DoGrep(
+	CEditView*				pcViewDst,
+	bool					bGrepReplace,
+	const CNativeW*			pcmGrepKey,
+	const CNativeW*			pcmGrepReplace,
+	const CNativeW*			pcmGrepFile,
+	const CNativeW*			pcmGrepFolder,
+	const CNativeW*			pcmExcludeFile,
+	const CNativeW*			pcmExcludeFolder,
+	bool					bGrepCurFolder,
+	BOOL					bGrepSubFolder,
+	bool					bGrepStdout,
+	bool					bGrepHeader,
+	const SSearchOption&	sSearchOption,
+	ECodeType				nGrepCharSet,
+	int						nGrepOutputLineType,
+	int						nGrepOutputStyle,
+	bool					bGrepOutputFileOnly,
+	bool					bGrepOutputBaseFolder,
+	bool					bGrepSeparateFolder,
+	bool					bGrepPaste,
+	bool					bGrepBackup
+)
+{
+	DWORD ret;
+
+	if ( sSearchOption.bUseRipgrep ) {
+		ret = DoGrepRipgrep(
+			pcViewDst,
+			pcmGrepKey,
+			pcmGrepFolder,
+			sSearchOption
+		);
+	}
+	else {
+		ret = DoGrepSakura(
+			pcViewDst,
+			bGrepReplace,
+			pcmGrepKey,
+			pcmGrepReplace,
+			pcmGrepFile,
+			pcmGrepFolder,
+			pcmExcludeFile,
+			pcmExcludeFolder,
+			bGrepCurFolder,
+			bGrepSubFolder,
+			bGrepStdout,
+			bGrepHeader,
+			sSearchOption,
+			nGrepCharSet,
+			nGrepOutputLineType,
+			nGrepOutputStyle,
+			bGrepOutputFileOnly,
+			bGrepOutputBaseFolder,
+			bGrepSeparateFolder,
+			bGrepPaste,
+			bGrepBackup
+		);
+	}
+
+	return ret;
+}
+
+
+class COutputAdapterGrep : public COutputAdapter
+{
+public:
+	COutputAdapterGrep(CEditView* view) : m_view(view)
+	{
+		m_pCShareData = CShareData::getInstance();
+		m_pCommander = &(view->GetCommander());
+	}
+	~COutputAdapterGrep() {};
+
+	bool OutputW(const WCHAR* pBuf, int size = -1) override;
+	bool OutputA(const ACHAR* pBuf, int size = -1) override;
+	bool IsActiveDebugWindow() { return FALSE == m_bWindow; }
+
+protected:
+	void OutputBuf(const WCHAR* pBuf, int size);
+
+	BOOL m_bWindow;
+	CEditView* m_view;
+	CShareData* m_pCShareData;
+	CViewCommander* m_pCommander;
+};
+
+void COutputAdapterGrep::OutputBuf(const WCHAR* pBuf, int size)
+{
+	if (m_bWindow) {
+		m_pCommander->Command_INSTEXT(false, pBuf, CLogicInt(size), true);
+	}
+	else {
+		m_pCShareData->TraceOutString(pBuf, size);
+	}
+}
+
+bool COutputAdapterGrep::OutputW(const WCHAR* pBuf, int size)
+{
+	OutputBuf(pBuf, size);
+	return true;
+}
+
+/*
+	@param pBuf size未指定なら要NUL終端
+	@param size ACHAR単位
+*/
+bool COutputAdapterGrep::OutputA(const ACHAR* pBuf, int size)
+{
+	CNativeA input;
+	CNativeW buf;
+	if (-1 == size) {
+		input.SetString(pBuf);
+	}
+	else {
+		input.SetString(pBuf, size);
+	}
+	auto pcCodeBase = std::unique_ptr<CCodeBase>(CCodeFactory::CreateCodeBase(ECodeType::CODE_SJIS, 0));
+	pcCodeBase->CodeToUnicode(*input._GetMemory(), &buf);
+	OutputBuf(buf.GetStringPtr(), (int)buf.GetStringLength());
+	return true;
+}
+
+#define RIPGREP_COMMAND L"rg.exe"
+
+/*! ripgrepでGrep実行
+*/
+DWORD CGrepAgent::DoGrepRipgrep(
+	CEditView* pcViewDst,
+	const CNativeW* pcmGrepKey,
+	const CNativeW* pcmGrepFolder,
+	const SSearchOption& sSearchOption
+)
+{
+	// rg.exeのパス取得
+	WCHAR	cmdline[1024];
+	WCHAR	szExeFolder[_MAX_PATH + 1];
+	GetExedir(cmdline, RIPGREP_COMMAND);
+	SplitPath_FolderAndFile(cmdline, szExeFolder, NULL);
+
+	// オプション設定
+	WCHAR options[1024] = { 0 };
+	wcscpy(options, L" --line-number --column --encoding sjis"); //デフォルトオプション付加 行数出力
+	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i"); //大文字小文字区別
+	if (!sSearchOption.bRegularExp) wcscat(options, L" -F"); //正規表現使用
+
+	//コマンドライン文字列作成(MAX:1024)
+	WCHAR szCmdDir[_MAX_PATH];
+	::GetSystemDirectory(szCmdDir, _countof(szCmdDir));
+	auto_sprintf(cmdline, L"\"%s\\cmd.exe\" /D /C \"\"%s\\%s\" %s %s %s\"",
+		szCmdDir,
+		szExeFolder,		//sakura.exeパス
+		RIPGREP_COMMAND,	//rg.exe
+		options,			//rgオプション
+		pcmGrepKey->GetStringPtr(),
+		pcmGrepFolder->GetStringPtr()
+	);
+
+	//コマンドライン実行
+	HANDLE	hStdOutWrite, hStdOutRead;
+
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&pi, sizeof(pi));
+
+	//子プロセスの標準出力と接続するパイプを作成
+	SECURITY_ATTRIBUTES	sa;
+	ZeroMemory(&sa, sizeof(sa));
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = NULL;
+	hStdOutRead = hStdOutWrite = 0;
+	if (CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 1000) == FALSE)
+	{
+		//エラー
+		return false;
+	}
+
+	//CreateProcessに渡すSTARTUPINFOを作成
+	STARTUPINFO sui;
+	ZeroMemory(&sui, sizeof(sui));
+	sui.cb = sizeof(sui);
+
+	sui.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+	sui.wShowWindow = SW_SHOW;
+	sui.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	sui.hStdOutput = hStdOutWrite;
+	sui.hStdError = hStdOutWrite;
+
+	BOOL bProcessResult = CreateProcess(
+		NULL,
+		cmdline,
+		NULL,
+		NULL,
+		TRUE,
+		CREATE_NEW_CONSOLE,
+		NULL,
+		pcmGrepFolder->GetStringPtr(),
+		&sui,
+		&pi
+	);
+
+	DWORD	new_cnt;
+	int		bufidx = 0;
+	bool	bLoopFlag = true;
+	bool	bCancelEnd = false; // キャンセルでプロセス停止
+
+	COutputAdapter* oa = new COutputAdapterGrep(pcViewDst);
+	CDlgCancel cDlgCancel;
+
+	//中断ダイアログ表示
+	if (oa->IsEnableRunningDlg()) {
+		cDlgCancel.DoModeless(G_AppInstance(), pcViewDst->m_hwndParent, IDD_GREPRUNNING);
+		// ダイアログにコマンドを表示
+		::DlgItem_SetText(cDlgCancel.GetHwnd(), IDC_STATIC_CMD, pcmGrepKey->GetStringPtr());
+	}
+	//実行したコマンドラインを表示
+	WCHAR szTextDate[1024], szTextTime[1024];
+	SYSTEMTIME systime;
+	::GetLocalTime(&systime);
+	WCHAR szOutTemp[1024 * 2 + 100];
+	oa->OutputW(L"\r\n");
+	oa->OutputW(L"#============================================================\r\n");
+	oa->OutputW(L"#============================================================\r\n");
+
+	typedef char PIPE_CHAR;
+	const int WORK_NULL_TERMS = sizeof(wchar_t); // 出力用\0の分
+	const int MAX_BUFIDX = 10; // bufidxの分
+	const DWORD MAX_WORK_READ = 1024 * 5; // 5KiB ReadFileで読み込む限界値
+	PIPE_CHAR work[MAX_WORK_READ + MAX_BUFIDX + WORK_NULL_TERMS];
+	//実行結果の取り込み
+	do {
+		switch (MsgWaitForMultipleObjects(1, &pi.hProcess, FALSE, 20, QS_ALLEVENTS)) {
+		case WAIT_OBJECT_0:
+			//終了していればループフラグをfalseとする
+			//ただしループの終了条件は プロセス終了 && パイプが空
+			bLoopFlag = false;
+			break;
+		case WAIT_OBJECT_0 + 1:
+			//処理中のユーザー操作を可能にする
+			if (!::BlockingHook(cDlgCancel.GetHwnd())) {
+				// WM_QUIT受信。ただちに終了処理
+				::TerminateProcess(pi.hProcess, 0);
+				goto finish;
+			}
+			break;
+		default:
+			break;
+		}
+		//中断ボタン押下チェック
+		if (cDlgCancel.IsCanceled()) {
+			//指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
+			::TerminateProcess(pi.hProcess, 0);
+			bCancelEnd = true;
+			break;
+		}
+		new_cnt = 0;
+
+		if (PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {	//パイプの中の読み出し待機中の文字数を取得
+			while (new_cnt > 0) {												//待機中のものがある
+
+				if (new_cnt > MAX_WORK_READ) {							//パイプから読み出す量を調整
+					new_cnt = MAX_WORK_READ;
+				}
+				DWORD	read_cnt = 0;
+				::ReadFile(hStdOutRead, &work[bufidx], new_cnt, &read_cnt, NULL);	//パイプから読み出し
+				read_cnt += bufidx;													//work内の実際のサイズにする
+
+				if (read_cnt == 0) {
+					// Jan. 23, 2004 genta while追加のため制御を変更
+					break;
+				}
+				{ //UTF-8
+					int		j;
+					int checklen = 0;
+					for (j = 0; j < (int)read_cnt;) {
+						ECharSet echarset;
+						checklen = CheckUtf8Char2(work + j, read_cnt - j, &echarset, true, 0);
+						if (echarset == CHARSET_BINARY2) {
+							break;
+						}
+						else if (read_cnt - 1 == j && work[j] == _T2(PIPE_CHAR, '\r')) {
+							// CRLFの一部ではない改行が末尾にある
+							// 次の読み込みで、CRLFの一部になる可能性がある
+							break;
+						}
+						else {
+							j += checklen;
+						}
+					}
+					if (j == (int)read_cnt) {	//ぴったり出力できる場合
+						work[read_cnt] = '\0';
+						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
+						if (!oa->OutputA(work, read_cnt)) {
+							goto finish;
+						}
+						bufidx = 0;
+					}
+					else {
+						DEBUG_TRACE(L"read_cnt %d j %d\n", read_cnt, j);
+						char tmp[5];
+						int len = read_cnt - j;
+						memcpy(tmp, &work[j], len);
+						work[j] = '\0';
+						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
+						if (!oa->OutputA(work, j)) {
+							goto finish;
+						}
+						memcpy(work, tmp, len);
+						bufidx = len;
+						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp[0]);
+					}
+				}
+				// 子プロセスの出力をどんどん受け取らないと子プロセスが
+				// 停止してしまうため，バッファが空になるまでどんどん読み出す．
+				new_cnt = 0;
+				if (!PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {
+					break;
+				}
+				Sleep(0);
+
+				// 2010.04.12 Moca 相手が出力しつづけていると止められないから
+				// BlockingHookとキャンセル確認を読取ループ中でも行う
+				// bLoopFlag が立っていないときは、すでにプロセスは終了しているからTerminateしない
+				if (!::BlockingHook(cDlgCancel.GetHwnd())) {
+					if (bLoopFlag) {
+						::TerminateProcess(pi.hProcess, 0);
+					}
+					goto finish;
+				}
+				if (cDlgCancel.IsCanceled()) {
+					//指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
+					if (bLoopFlag) {
+						::TerminateProcess(pi.hProcess, 0);
+					}
+					bCancelEnd = true;
+					goto user_cancel;
+				}
+			}
+		}
+	} while (bLoopFlag || new_cnt > 0);
+
+user_cancel:
+
+	// 最後の文字の出力(たいていCR)
+	if (0 < bufidx) {
+		{ //UTF-8
+			work[bufidx] = '\0';
+			oa->OutputA(work, bufidx);
+		}
+	}
+
+	if (bCancelEnd) {
+		//	2006.12.03 maru アウトプットウィンドウにのみ出力
+		//最後にテキストを追加
+		oa->OutputW(LS(STR_EDITVIEW_EXECCMD_STOP));
+	}
+
+	{
+		//	2006.12.03 maru アウトプットウィンドウにのみ出力
+		//	Jun. 04, 2003 genta	終了コードの取得と出力
+		DWORD result;
+		::GetExitCodeProcess(pi.hProcess, &result);
+		WCHAR endCode[128];
+		auto_sprintf(endCode, LS(STR_EDITVIEW_EXECCMD_RET), result);
+		oa->OutputW(endCode);
+		// 2004.09.20 naoh 終了コードが1以上の時はアウトプットをアクティブにする
+		if (result > 0 && oa->IsActiveDebugWindow()) {
+			ActivateFrameWindow(GetDllShareData().m_sHandles.m_hwndDebug);
+		}
+	}
+
+finish:
+	if (hStdOutWrite) CloseHandle(hStdOutWrite);
+	CloseHandle(hStdOutRead);
+	if (pi.hProcess) CloseHandle(pi.hProcess);
+	if (pi.hThread) CloseHandle(pi.hThread);
+	delete oa;
+
+	return 0;
+}
+
+/*! sakuraでGrep実行
 
   @param[in] pcmGrepKey 検索パターン
   @param[in] pcmGrepFile 検索対象ファイルパターン(!で除外指定))
@@ -183,7 +568,7 @@ void CGrepAgent::AddTail( CEditView* pcEditView, const CNativeW& cmem, bool bAdd
   @date 2008.12.13 genta 検索パターンのバッファオーバラン対策
   @date 2012.10.13 novice 検索オプションをクラスごと代入
 */
-DWORD CGrepAgent::DoGrep(
+DWORD CGrepAgent::DoGrepSakura(
 	CEditView*				pcViewDst,
 	bool					bGrepReplace,
 	const CNativeW*			pcmGrepKey,

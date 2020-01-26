@@ -153,13 +153,15 @@ struct SSearchOption{
 	bool	bRegularExp;	//!< true==正規表現
 	bool	bLoHiCase;		//!< true==英大文字小文字の区別
 	bool	bWordOnly;		//!< true==単語のみ検索
+	bool	bUseRipgrep;	//!< true==ripgrepを使う
 
 	// コンストラクタ
 	SSearchOption() noexcept;
 	SSearchOption(
 		bool _bRegularExp,
 		bool _bLoHiCase,
-		bool _bWordOnly
+		bool _bWordOnly,
+		bool _bUseRipgrep
 	) noexcept;
 
 	// 操作
