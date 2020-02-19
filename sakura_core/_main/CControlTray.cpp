@@ -206,6 +206,7 @@ void CControlTray::DoGrepCreateWindow(HINSTANCE hinst, HWND msgParent, CDlgGrep&
 	if( cDlgGrep.m_bSubFolder					)wcscat( pOpt, L"S" );	// サブフォルダからも検索する
 	if( cDlgGrep.m_sSearchOption.bLoHiCase		)wcscat( pOpt, L"L" );	// 英大文字と英小文字を区別する
 	if( cDlgGrep.m_sSearchOption.bRegularExp	)wcscat( pOpt, L"R" );	// 正規表現
+	if( cDlgGrep.m_sSearchOption.bUseRipgrep	)wcscat( pOpt, L"G" );	// Ripgrepを使う
 	if( cDlgGrep.m_nGrepOutputLineType == 1     )wcscat( pOpt, L"P" );	// 行を出力する
 	if( cDlgGrep.m_nGrepOutputLineType == 2     )wcscat( pOpt, L"N" );	// 否ヒット行を出力する 2014.09.23
 	if( cDlgGrep.m_sSearchOption.bWordOnly		)wcscat( pOpt, L"W" );	// 単語単位で探す

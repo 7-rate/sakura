@@ -457,16 +457,7 @@ BOOL CDlgGrep::OnBnClicked( int wID )
 		}
 		break;
 	case IDC_CHK_USERIPGREP:
-		//TODO リファクタ
-		//そもそもrg.exeがいなかったらこのチェックボタンをグレーアウトしておきたい
-		if ( ::IsDlgButtonChecked(GetHwnd(), IDC_CHK_USERIPGREP) ) {
-			//TODO 実装予定
-			//ripgrepで対応していない機能のグレーアウト
-			::EnableWindow(GetItemHwnd(IDC_CHK_SUBFOLDER), FALSE); //サブフォルダから検索
-		}else {
-			//グレーアウトの解除
-			::EnableWindow(GetItemHwnd(IDC_CHK_SUBFOLDER), TRUE); //サブフォルダから検索
-		}
+		SetUseripgrep( 0 != ::IsDlgButtonChecked( GetHwnd(), IDC_CHK_USERIPGREP ) );
 		break;
 	case IDOK:
 		/* ダイアログデータの取得 */
@@ -619,14 +610,8 @@ void CDlgGrep::SetData( void )
 	::CheckDlgButton( GetHwnd(), IDC_CHK_DEFAULTFOLDER, m_pShareData->m_Common.m_sSearch.m_bGrepDefaultFolder );
 
 	//ripgrepが使えるか
-	if (CanRipgrep()) {
-		::EnableWindow(GetItemHwnd(IDC_CHK_USERIPGREP), true);
-		::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_sSearchOption.bUseRipgrep);
-	}
-	else {
-		::EnableWindow(GetItemHwnd(IDC_CHK_USERIPGREP), false);
-		::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, false);
-	}
+	::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_sSearchOption.bUseRipgrep);
+	SetDataFromThisText(m_sSearchOption.bUseRipgrep);
 
 	return;
 }
@@ -655,6 +640,31 @@ void CDlgGrep::SetDataFromThisText( bool bChecked )
 	::EnableWindow( GetItemHwnd( IDC_COMBO_FOLDER ),  bEnableControls );
 	::EnableWindow( GetItemHwnd( IDC_BUTTON_FOLDER ), bEnableControls );
 	::EnableWindow( GetItemHwnd( IDC_CHK_SUBFOLDER ), bEnableControls );
+	return;
+}
+
+/*!
+	ripgrepを使うチェックでの設定
+*/
+void CDlgGrep::SetUseripgrep(bool bChecked )
+{
+	int nUnsupported[] = {
+		IDC_CHK_SUBFOLDER,		// サブフォルダからも検索する
+		IDC_CHK_FROMTHISTEXT,	// 現在編集中のファイルから検索
+		IDC_CHECK_FILE_ONLY,	// ファイル毎最初のみ検索
+		IDC_CHECK_SEP_FOLDER,	// フォルダ毎に表示
+		IDC_CHECK_BASE_PATH,	// ベースフォルダ表示
+		IDC_RADIO_OUTPUTLINE,	// 結果出力:該当行
+		IDC_RADIO_OUTPUTMARKED,	// 結果出力:該当部分
+		IDC_RADIO_NOHIT,		// 結果出力:否該当行
+		IDC_RADIO_OUTPUTSTYLE1,	// 結果出力形式:ノーマル
+		IDC_RADIO_OUTPUTSTYLE2,	// 結果出力形式:ファイル毎
+		IDC_RADIO_OUTPUTSTYLE3	// 結果出力形式:結果のみ
+	};
+
+	for ( auto hwnd : nUnsupported) {
+		::EnableWindow(GetItemHwnd(hwnd), !bChecked);
+	}
 	return;
 }
 

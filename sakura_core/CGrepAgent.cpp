@@ -206,9 +206,26 @@ DWORD CGrepAgent::DoGrep(
 	if ( sSearchOption.bUseRipgrep ) {
 		ret = DoGrepRipgrep(
 			pcViewDst,
+			bGrepReplace,
 			pcmGrepKey,
+			pcmGrepReplace,
+			pcmGrepFile,
 			pcmGrepFolder,
-			sSearchOption
+			pcmExcludeFile,
+			pcmExcludeFolder,
+			bGrepCurFolder,
+			bGrepSubFolder,
+			bGrepStdout,
+			bGrepHeader,
+			sSearchOption,
+			nGrepCharSet,
+			nGrepOutputLineType,
+			nGrepOutputStyle,
+			bGrepOutputFileOnly,
+			bGrepOutputBaseFolder,
+			bGrepSeparateFolder,
+			bGrepPaste,
+			bGrepBackup
 		);
 	}
 	else {
@@ -302,13 +319,44 @@ bool COutputAdapterGrep::OutputA(const ACHAR* pBuf, int size)
 
 #define RIPGREP_COMMAND L"rg.exe"
 
-/*! ripgrepでGrep実行
-*/
+/* 指定したパスにある適当なファイルのフルパスを返す */
+std::wstring CGrepAgent::getFirstFilePath(const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumFiles& cGrepExceptAbsFiles)
+{
+	std::wstring lpFileName = L"";
+
+	CGrepEnumOptions cGrepEnumOptions;
+	CGrepEnumFilterFiles cGrepEnumFilterFiles;
+	cGrepEnumFilterFiles.Enumerates(pszPath, cGrepEnumKeys, cGrepEnumOptions, cGrepExceptAbsFiles);
+
+	int count = cGrepEnumFilterFiles.GetCount();
+	lpFileName = cGrepEnumFilterFiles.GetFileName(0);
+
+	return lpFileName;
+}
+
+/* ripgrepでGrep実行 */
 DWORD CGrepAgent::DoGrepRipgrep(
 	CEditView* pcViewDst,
+	bool					bGrepReplace,
 	const CNativeW* pcmGrepKey,
+	const CNativeW* pcmGrepReplace,
+	const CNativeW* pcmGrepFile,
 	const CNativeW* pcmGrepFolder,
-	const SSearchOption& sSearchOption
+	const CNativeW* pcmExcludeFile,
+	const CNativeW* pcmExcludeFolder,
+	bool					bGrepCurFolder,
+	BOOL					bGrepSubFolder,
+	bool					bGrepStdout,
+	bool					bGrepHeader,
+	const SSearchOption& sSearchOption,
+	ECodeType				nGrepCharSet,	// 2002/09/21 Moca 文字コードセット選択
+	int						nGrepOutputLineType,
+	int						nGrepOutputStyle,
+	bool					bGrepOutputFileOnly,	//!< [in] ファイル毎最初のみ出力
+	bool					bGrepOutputBaseFolder,	//!< [in] ベースフォルダ表示
+	bool					bGrepSeparateFolder,	//!< [in] フォルダ毎に表示
+	bool					bGrepPaste,
+	bool					bGrepBackup
 )
 {
 	// rg.exeのパス取得
@@ -319,9 +367,87 @@ DWORD CGrepAgent::DoGrepRipgrep(
 
 	// オプション設定
 	WCHAR options[1024] = { 0 };
-	wcscpy(options, L" --line-number --column --encoding sjis"); //デフォルトオプション付加 行数出力
+	wcscpy(options, L" --line-number --column"); //デフォルトオプション付加 行数出力
 	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i"); //大文字小文字区別
 	if (!sSearchOption.bRegularExp) wcscat(options, L" -F"); //正規表現使用
+	if (!sSearchOption.bWordOnly) wcscat(options, L" -w"); //単語単位検索
+
+	// エンコーディング
+	ECodeType outputEncoding;
+	if (IsValidCodeOrCPType(nGrepCharSet)) {
+		WCHAR szCpName[100];
+		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
+		wcscat(options, L" -E ");
+		wcscat(options, szCpName);
+		outputEncoding = nGrepCharSet;
+	}
+	else {
+		// エンコーディング自動判別
+		CGrepEnumKeys cGrepEnumKeys;
+		{
+			int nErrorNo = cGrepEnumKeys.SetFileKeys(pcmGrepFile->GetStringPtr());
+			int nErrorNo_ExcludeFile = cGrepEnumKeys.AddExceptFile(pcmExcludeFile->GetStringPtr());
+			int nErrorNo_ExcludeFolder = cGrepEnumKeys.AddExceptFolder(pcmExcludeFolder->GetStringPtr());
+			if (nErrorNo != 0 || nErrorNo_ExcludeFile != 0 || nErrorNo_ExcludeFolder != 0) {
+				this->m_bGrepRunning = false;
+				pcViewDst->m_bDoing_UndoRedo = false;
+				pcViewDst->SetUndoBuffer();
+
+				const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
+				if (nErrorNo == 1) {
+					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+				}
+				else if (nErrorNo == 2) {
+					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+				}
+				else if (nErrorNo_ExcludeFile == 1) {
+					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+				}
+				else if (nErrorNo_ExcludeFile == 2) {
+					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+				}
+				else if (nErrorNo_ExcludeFolder == 1) {
+					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+				}
+				else if (nErrorNo_ExcludeFolder == 2) {
+					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+				}
+				ErrorMessage(pcViewDst->m_hwndParent, L"%s", pszErrorMessage);
+				return 0;
+			}
+		}
+		CGrepEnumOptions cGrepEnumOptions;
+		CGrepEnumFiles cGrepExceptAbsFiles;
+		cGrepExceptAbsFiles.Enumerates(L"", cGrepEnumKeys.m_vecExceptAbsFileKeys, cGrepEnumOptions);
+		std::wstring currentFile = pcmGrepFolder->GetStringPtr();
+		std::wstring lpFileName = getFirstFilePath(currentFile.c_str(), cGrepEnumKeys, cGrepExceptAbsFiles);
+		currentFile += L"\\";
+		currentFile += lpFileName;
+		WCHAR szCpName[100];
+		const STypeConfigMini* type = NULL;
+		if (!CDocTypeManager().GetTypeConfigMini(CDocTypeManager().GetDocumentTypeOfPath(lpFileName.c_str()), &type)) {
+			return -1;
+		}
+		CCodeMediator cmediator(type->m_encoding);
+		ECodeType	nCharCode;
+		const WCHAR* pszCodeName;
+		pszCodeName = L"";
+		nCharCode = cmediator.CheckKanjiCodeOfFile(currentFile.c_str());
+		if (!IsValidCodeOrCPType(nCharCode)) {
+			pszCodeName = L"  [(DetectError)]";
+		}
+		else if (IsValidCodeType(nCharCode)) {
+			pszCodeName = CCodeTypeName(nCharCode).Short();
+		}
+		else {
+			CCodePage::GetNameBracket(szCpName, nCharCode);
+			pszCodeName = szCpName;
+		}
+		wcscat(options, L" -E ");
+		wcscat(options, pszCodeName);
+		outputEncoding = nCharCode;
+	}
+	outputEncoding = CODE_SJIS;
 
 	//コマンドライン文字列作成(MAX:1024)
 	WCHAR szCmdDir[_MAX_PATH];
@@ -377,6 +503,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		&sui,
 		&pi
 	);
+
 
 	DWORD	new_cnt;
 	int		bufidx = 0;
@@ -448,7 +575,98 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					// Jan. 23, 2004 genta while追加のため制御を変更
 					break;
 				}
-				{ //UTF-8
+
+				if (outputEncoding == CODE_UNICODE) {
+					wchar_t* workw;
+					int			read_cntw;
+					bool		bCarry;
+					char		byteCarry = 0;
+					workw = (wchar_t*)work;
+					read_cntw = (int)read_cnt / sizeof(wchar_t);
+					if (read_cnt % (int)sizeof(wchar_t)) {
+						byteCarry = work[read_cnt - 1];
+					}
+					if (read_cntw) {
+						workw[read_cntw] = L'\0';
+						bCarry = false;
+						//読み出した文字列をチェックする
+						if (workw[read_cntw - 1] == L'\r') {
+							bCarry = true;
+							read_cntw -= 1; // 2010.04.12 1文字余分に消されてた
+							workw[read_cntw] = L'\0';
+						}
+						if (!oa->OutputW(workw, read_cntw)) {
+							goto finish;
+						}
+						bufidx = 0;
+						if (bCarry) {
+							workw[0] = L'\r'; // 2010.04.12 'r' -> '\r'
+							bufidx = sizeof(wchar_t);
+							DEBUG_TRACE(L"ExecCmd: Carry last character [CR]\n");
+						}
+					}
+					if (read_cnt % (int)sizeof(wchar_t)) {
+						// 高確率で0だと思うが1だと困る
+						DEBUG_TRACE(L"ExecCmd: Carry Unicode 1byte [%x]\n", byteCarry);
+						work[bufidx] = byteCarry;
+						bufidx += 1;
+					}
+				}
+				// end 2008/6/8 Uchi
+				else if (outputEncoding == CODE_SJIS) {
+					//読み出した文字列をチェックする
+					// \r\n を \r だけとか漢字の第一バイトだけを出力するのを防ぐ必要がある
+					//@@@ 2002.1.24 YAZAKI 1バイト取りこぼす可能性があった。
+					//	Jan. 28, 2004 Moca 最後の文字はあとでチェックする
+					int		j;
+					for (j = 0; j < (int)read_cnt - 1; j++) {
+						//	2007.09.10 ryoji
+						if (CShiftJis::GetSizeOfChar(work, read_cnt, j) == 2) {
+							j++;
+						}
+						else {
+							if (work[j] == _T2(PIPE_CHAR, '\r') && work[j + 1] == _T2(PIPE_CHAR, '\n')) {
+								j++;
+							}
+						}
+					}
+					//	From Here Jan. 28, 2004 Moca
+					//	改行コードが分割されるのを防ぐ
+					if ((DWORD)j == read_cnt - 1) {
+						if (_IS_SJIS_1(work[j])) {
+							j = read_cnt + 1; // ぴったり出力できないことを主張
+						}
+						else if (work[j] == _T2(PIPE_CHAR, '\r')) {
+							// CRLFの一部ではない改行が末尾にある
+							// 次の読み込みで、CRLFの一部になる可能性がある
+							j = read_cnt + 1;
+						}
+						else {
+							j = read_cnt;
+						}
+					}
+					//	To Here Jan. 28, 2004 Moca
+					if (j == (int)read_cnt) {	//ぴったり出力できる場合
+						work[read_cnt] = '\0';
+						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
+						if (!oa->OutputA(work, read_cnt)) {
+							goto finish;
+						}
+						bufidx = 0;
+					}
+					else {
+						char tmp = work[read_cnt - 1];
+						work[read_cnt - 1] = '\0';
+						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
+						if (!oa->OutputA(work, read_cnt - 1)) {
+							goto finish;
+						}
+						work[0] = tmp;
+						bufidx = 1;
+						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp);
+					}
+				}
+				else if (outputEncoding == CODE_UTF8) {
 					int		j;
 					int checklen = 0;
 					for (j = 0; j < (int)read_cnt;) {
@@ -489,6 +707,8 @@ DWORD CGrepAgent::DoGrepRipgrep(
 						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp[0]);
 					}
 				}
+
+
 				// 子プロセスの出力をどんどん受け取らないと子プロセスが
 				// 停止してしまうため，バッファが空になるまでどんどん読み出す．
 				new_cnt = 0;

@@ -248,7 +248,8 @@ void CViewCommander::Command_GREP_REPLACE( void )
 		if( cDlgGrepRep.m_bSubFolder				)wcscat( pOpt, L"S" );	// サブフォルダからも検索する
 		if( cDlgGrepRep.m_sSearchOption.bWordOnly	)wcscat( pOpt, L"W" );	// 単語単位で探す
 		if( cDlgGrepRep.m_sSearchOption.bLoHiCase	)wcscat( pOpt, L"L" );	// 英大文字と英小文字を区別する
-		if( cDlgGrepRep.m_sSearchOption.bRegularExp	)wcscat( pOpt, L"R" );	// 正規表現
+		if (cDlgGrepRep.m_sSearchOption.bRegularExp)wcscat(pOpt, L"R");		// 正規表現
+		if( cDlgGrepRep.m_sSearchOption.bUseRipgrep)wcscat(pOpt, L"G" );	// Ripgrepを使う
 		if( cDlgGrepRep.m_nGrepOutputLineType == 1     )wcscat( pOpt, L"P" );	// 行を出力する
 		// if( cDlgGrepRep.m_nGrepOutputLineType == 2     )wcscat( pOpt, L"N" );	// 否ヒット行を出力する 2014.09.23
 		if( 1 == cDlgGrepRep.m_nGrepOutputStyle		)wcscat( pOpt, L"1" );	// Grep: 出力形式
