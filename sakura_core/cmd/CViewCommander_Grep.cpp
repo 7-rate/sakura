@@ -111,7 +111,8 @@ void CViewCommander::Command_GREP( void )
 			GetEditWindow()->m_cDlgGrep.m_bGrepOutputBaseFolder,
 			GetEditWindow()->m_cDlgGrep.m_bGrepSeparateFolder,
 			false,
-			false
+			false,
+			GetEditWindow()->m_cDlgGrep.m_bUseRipgrep
 		);
 
 		//プラグイン：DocumentOpenイベント実行
@@ -211,7 +212,8 @@ void CViewCommander::Command_GREP_REPLACE( void )
 			cDlgGrepRep.m_bGrepOutputBaseFolder,
 			cDlgGrepRep.m_bGrepSeparateFolder,
 			cDlgGrepRep.m_bPaste,
-			cDlgGrepRep.m_bBackup
+			cDlgGrepRep.m_bBackup,
+			cDlgGrepRep.m_bUseRipgrep
 		);
 	}
 	else{
@@ -249,7 +251,6 @@ void CViewCommander::Command_GREP_REPLACE( void )
 		if( cDlgGrepRep.m_sSearchOption.bWordOnly	)wcscat( pOpt, L"W" );	// 単語単位で探す
 		if( cDlgGrepRep.m_sSearchOption.bLoHiCase	)wcscat( pOpt, L"L" );	// 英大文字と英小文字を区別する
 		if (cDlgGrepRep.m_sSearchOption.bRegularExp)wcscat(pOpt, L"R");		// 正規表現
-		if( cDlgGrepRep.m_sSearchOption.bUseRipgrep)wcscat(pOpt, L"G" );	// Ripgrepを使う
 		if( cDlgGrepRep.m_nGrepOutputLineType == 1     )wcscat( pOpt, L"P" );	// 行を出力する
 		// if( cDlgGrepRep.m_nGrepOutputLineType == 2     )wcscat( pOpt, L"N" );	// 否ヒット行を出力する 2014.09.23
 		if( 1 == cDlgGrepRep.m_nGrepOutputStyle		)wcscat( pOpt, L"1" );	// Grep: 出力形式

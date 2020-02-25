@@ -35,7 +35,7 @@ HINSTANCE G_AppInstance()
  * コンストラクタ
  */
 SSearchOption::SSearchOption() noexcept
-	: SSearchOption(false, false, false, false)
+	: SSearchOption(false, false, false)
 {
 }
 
@@ -45,13 +45,11 @@ SSearchOption::SSearchOption() noexcept
 SSearchOption::SSearchOption(
 	bool _bRegularExp,
 	bool _bLoHiCase,
-	bool _bWordOnly,
-	bool _bUseRipgrep
+	bool _bWordOnly
 ) noexcept
 	: bRegularExp(_bRegularExp)
 	, bLoHiCase(_bLoHiCase)
 	, bWordOnly(_bWordOnly)
-	, bUseRipgrep(_bUseRipgrep)
 {
 }
 
@@ -61,7 +59,6 @@ void SSearchOption::Reset()
 	bRegularExp = false;
 	bLoHiCase = false;
 	bWordOnly = false;
-	bUseRipgrep = false;
 }
 
 /*!
@@ -76,8 +73,7 @@ bool SSearchOption::operator == (const SSearchOption& rhs) const noexcept
 	if (this == &rhs) return true;
 	return bRegularExp == rhs.bRegularExp
 		&& bLoHiCase == rhs.bLoHiCase
-		&& bWordOnly == rhs.bWordOnly
-		&& bUseRipgrep == rhs.bUseRipgrep;
+		&& bWordOnly == rhs.bWordOnly;
 }
 
 /*!

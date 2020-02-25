@@ -198,12 +198,13 @@ DWORD CGrepAgent::DoGrep(
 	bool					bGrepOutputBaseFolder,
 	bool					bGrepSeparateFolder,
 	bool					bGrepPaste,
-	bool					bGrepBackup
+	bool					bGrepBackup,
+	bool					bUseRipgrep
 )
 {
 	DWORD ret;
 
-	if ( sSearchOption.bUseRipgrep ) {
+	if ( bUseRipgrep) {
 		ret = DoGrepRipgrep(
 			pcViewDst,
 			bGrepReplace,
@@ -370,7 +371,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	wcscpy(options, L" --line-number --column"); //デフォルトオプション付加 行数出力
 	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i"); //大文字小文字区別
 	if (!sSearchOption.bRegularExp) wcscat(options, L" -F"); //正規表現使用
-	if (!sSearchOption.bWordOnly) wcscat(options, L" -w"); //単語単位検索
+	if (sSearchOption.bWordOnly) wcscat(options, L" -w"); //単語単位検索
 
 	// エンコーディング
 	ECodeType outputEncoding;

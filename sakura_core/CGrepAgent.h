@@ -98,7 +98,8 @@ public:
 		bool					bGrepOutputBaseFolder,	//!< [in] ベースフォルダ表示
 		bool					bGrepSeparateFolder,	//!< [in] フォルダ毎に表示
 		bool					bGrepPaste,
-		bool					bGrepBackup
+		bool					bGrepBackup,
+		bool					bUseRipgrep
 	);
 
 private:

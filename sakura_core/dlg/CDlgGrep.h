@@ -40,6 +40,7 @@ public:
 
 	BOOL		m_bSubFolder;/*!< サブフォルダからも検索する */
 	BOOL		m_bFromThisText;/*!< この編集中のテキストから検索する */
+	BOOL		m_bUseRipgrep;//!<ripgrepを使う
 
 	SSearchOption	m_sSearchOption;	//!< 検索オプション
 

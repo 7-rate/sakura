@@ -80,6 +80,7 @@ CDlgGrep::CDlgGrep()
 	m_bGrepOutputFileOnly = false;
 	m_bGrepOutputBaseFolder = false;
 	m_bGrepSeparateFolder = false;
+	m_bUseRipgrep = false;
 
 	m_bSetText = false;
 	m_szFile[0] = 0;
@@ -152,6 +153,7 @@ int CDlgGrep::DoModal( HINSTANCE hInstance, HWND hwndParent, const WCHAR* pszCur
 	m_bGrepOutputFileOnly = m_pShareData->m_Common.m_sSearch.m_bGrepOutputFileOnly;
 	m_bGrepOutputBaseFolder = m_pShareData->m_Common.m_sSearch.m_bGrepOutputBaseFolder;
 	m_bGrepSeparateFolder = m_pShareData->m_Common.m_sSearch.m_bGrepSeparateFolder;
+	m_bUseRipgrep = m_pShareData->m_Common.m_sSearch.m_bUseRipgrep;
 
 	// 2013.05.21 コンストラクタからDoModalに移動
 	// m_strText は呼び出し元で設定済み
@@ -610,8 +612,8 @@ void CDlgGrep::SetData( void )
 	::CheckDlgButton( GetHwnd(), IDC_CHK_DEFAULTFOLDER, m_pShareData->m_Common.m_sSearch.m_bGrepDefaultFolder );
 
 	//ripgrepが使えるか
-	::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_sSearchOption.bUseRipgrep);
-	SetDataFromThisText(m_sSearchOption.bUseRipgrep);
+	::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_bUseRipgrep);
+	SetUseripgrep(m_bUseRipgrep);
 
 	return;
 }
@@ -691,7 +693,7 @@ int CDlgGrep::GetData( void )
 	m_sSearchOption.bRegularExp = (0!=::IsDlgButtonChecked( GetHwnd(), IDC_CHK_REGULAREXP ));
 
 	/* ripgrepを使う */
-	m_sSearchOption.bUseRipgrep = (0!=::IsDlgButtonChecked( GetHwnd(), IDC_CHK_USERIPGREP ));
+	m_bUseRipgrep = (0!=::IsDlgButtonChecked( GetHwnd(), IDC_CHK_USERIPGREP ));
 
 	/* 文字コード自動判別 */
 //	m_bKanjiCode_AutoDetect = ::IsDlgButtonChecked( GetHwnd(), IDC_CHK_KANJICODEAUTODETECT );
@@ -749,6 +751,7 @@ int CDlgGrep::GetData( void )
 	m_pShareData->m_Common.m_sSearch.m_bGrepOutputFileOnly = m_bGrepOutputFileOnly;
 	m_pShareData->m_Common.m_sSearch.m_bGrepOutputBaseFolder = m_bGrepOutputBaseFolder;
 	m_pShareData->m_Common.m_sSearch.m_bGrepSeparateFolder = m_bGrepSeparateFolder;
+	m_pShareData->m_Common.m_sSearch.m_bUseRipgrep = m_bUseRipgrep;
 
 	if( 0 != wcslen( m_szFile ) ){
 		CGrepEnumKeys enumKeys;
