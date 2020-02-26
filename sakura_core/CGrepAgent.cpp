@@ -505,7 +505,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		&pi
 	);
 
-
 	DWORD	new_cnt;
 	int		bufidx = 0;
 	bool	bLoopFlag = true;
