@@ -559,9 +559,15 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	SYSTEMTIME systime;
 	::GetLocalTime(&systime);
 	WCHAR szOutTemp[1024 * 2 + 100];
-	oa->OutputW(L"\r\n");
-	oa->OutputW(L"#============================================================\r\n");
-	oa->OutputW(L"#============================================================\r\n");
+//	oa->OutputW(L"\r\n");
+//	oa->OutputW(L"#============================================================\r\n");
+//	oa->OutputW(L"#============================================================\r\n");
+	CNativeW cmemMessage;
+	cmemMessage.AllocStringBuffer( 4000 );
+	cmemMessage.AppendString(L"#============================================================\r\n");
+	cmemMessage.AppendString(L"#============================================================\r\n");
+	AddTail( pcViewDst, cmemMessage, bGrepStdout );
+	cmemMessage._SetStringLength(0);
 
 	typedef char PIPE_CHAR;
 	const int WORK_NULL_TERMS = sizeof(wchar_t); // 出力用\0の分
@@ -630,9 +636,13 @@ DWORD CGrepAgent::DoGrepRipgrep(
 							read_cntw -= 1; // 2010.04.12 1文字余分に消されてた
 							workw[read_cntw] = L'\0';
 						}
-						if (!oa->OutputW(workw, read_cntw)) {
-							goto finish;
-						}
+//						if (!oa->OutputW(workw, read_cntw)) {
+//							goto finish;
+//						}
+						cmemMessage.AppendString(workw, read_cntw);
+						AddTail( pcViewDst, cmemMessage, bGrepStdout );
+						cmemMessage._SetStringLength(0);
+
 						bufidx = 0;
 						if (bCarry) {
 							workw[0] = L'\r'; // 2010.04.12 'r' -> '\r'
@@ -684,18 +694,27 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					if (j == (int)read_cnt) {	//ぴったり出力できる場合
 						work[read_cnt] = '\0';
 						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-						if (!oa->OutputA(work, read_cnt)) {
-							goto finish;
-						}
+//						if (!oa->OutputA(work, read_cnt)) {
+//							goto finish;
+//						}
+
+						
+						cmemMessage.AppendString((wchar_t*)work, read_cnt);
+						AddTail(pcViewDst, cmemMessage, bGrepStdout);
+						cmemMessage._SetStringLength(0);
 						bufidx = 0;
 					}
 					else {
 						char tmp = work[read_cnt - 1];
 						work[read_cnt - 1] = '\0';
 						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-						if (!oa->OutputA(work, read_cnt - 1)) {
-							goto finish;
-						}
+//						if (!oa->OutputA(work, read_cnt - 1)) {
+//							goto finish;
+//						}
+						cmemMessage.AppendString((wchar_t*)work, read_cnt-1);
+						AddTail( pcViewDst, cmemMessage, bGrepStdout );
+						cmemMessage._SetStringLength(0);
+
 						work[0] = tmp;
 						bufidx = 1;
 						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp);
@@ -722,9 +741,18 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					if (j == (int)read_cnt) {	//ぴったり出力できる場合
 						work[read_cnt] = '\0';
 						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-						if (!oa->OutputA(work, read_cnt)) {
-							goto finish;
-						}
+//						if (!oa->OutputA(work, read_cnt)) {
+//							goto finish;
+//						}
+						CMemory input;
+						CNativeW buf;
+						input.SetRawData(work, read_cnt);
+						CCodeBase* pcCodeBase = CCodeFactory::CreateCodeBase(CODE_UTF8, 0);
+						pcCodeBase->CodeToUnicode(input, &buf);
+
+						cmemMessage.AppendString(buf.GetStringPtr(), buf.GetStringLength());
+						AddTail( pcViewDst, cmemMessage, bGrepStdout );
+						cmemMessage._SetStringLength(0);
 						bufidx = 0;
 					}
 					else {
@@ -734,9 +762,12 @@ DWORD CGrepAgent::DoGrepRipgrep(
 						memcpy(tmp, &work[j], len);
 						work[j] = '\0';
 						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-						if (!oa->OutputA(work, j)) {
-							goto finish;
-						}
+//						if (!oa->OutputA(work, j)) {
+//							goto finish;
+//						}
+						cmemMessage.AppendString((wchar_t*)work, j);
+						AddTail( pcViewDst, cmemMessage, bGrepStdout );
+						cmemMessage._SetStringLength(0);
 						memcpy(work, tmp, len);
 						bufidx = len;
 						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp[0]);
@@ -775,33 +806,33 @@ DWORD CGrepAgent::DoGrepRipgrep(
 
 user_cancel:
 
-	// 最後の文字の出力(たいていCR)
-	if (0 < bufidx) {
-		{ //UTF-8
-			work[bufidx] = '\0';
-			oa->OutputA(work, bufidx);
-		}
-	}
+//	// 最後の文字の出力(たいていCR)
+//	if (0 < bufidx) {
+//		{ //UTF-8
+//			work[bufidx] = '\0';
+//			oa->OutputA(work, bufidx);
+//		}
+//	}
 
-	if (bCancelEnd) {
-		//	2006.12.03 maru アウトプットウィンドウにのみ出力
-		//最後にテキストを追加
-		oa->OutputW(LS(STR_EDITVIEW_EXECCMD_STOP));
-	}
+//	if (bCancelEnd) {
+//		//	2006.12.03 maru アウトプットウィンドウにのみ出力
+//		//最後にテキストを追加
+//		oa->OutputW(LS(STR_EDITVIEW_EXECCMD_STOP));
+//	}
 
-	{
-		//	2006.12.03 maru アウトプットウィンドウにのみ出力
-		//	Jun. 04, 2003 genta	終了コードの取得と出力
-		DWORD result;
-		::GetExitCodeProcess(pi.hProcess, &result);
-		WCHAR endCode[128];
-		auto_sprintf(endCode, LS(STR_EDITVIEW_EXECCMD_RET), result);
-		oa->OutputW(endCode);
-		// 2004.09.20 naoh 終了コードが1以上の時はアウトプットをアクティブにする
-		if (result > 0 && oa->IsActiveDebugWindow()) {
-			ActivateFrameWindow(GetDllShareData().m_sHandles.m_hwndDebug);
-		}
-	}
+//	{
+//		//	2006.12.03 maru アウトプットウィンドウにのみ出力
+//		//	Jun. 04, 2003 genta	終了コードの取得と出力
+//		DWORD result;
+//		::GetExitCodeProcess(pi.hProcess, &result);
+//		WCHAR endCode[128];
+//		auto_sprintf(endCode, LS(STR_EDITVIEW_EXECCMD_RET), result);
+//		oa->OutputW(endCode);
+//		// 2004.09.20 naoh 終了コードが1以上の時はアウトプットをアクティブにする
+//		if (result > 0 && oa->IsActiveDebugWindow()) {
+//			ActivateFrameWindow(GetDllShareData().m_sHandles.m_hwndDebug);
+//		}
+//	}
 
 finish:
 	if (hStdOutWrite) CloseHandle(hStdOutWrite);
