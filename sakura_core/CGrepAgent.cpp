@@ -262,7 +262,7 @@ DWORD CGrepAgent::DoGrep(
 class COutputAdapterGrep : public COutputAdapter
 {
 public:
-	COutputAdapterGrep(CEditView* view) : m_view(view)
+	COutputAdapterGrep(CEditView* view, BOOL bToEditWindow) : m_bWindow(bToEditWindow), m_view(view)
 	{
 		m_pCShareData = CShareData::getInstance();
 		m_pCommander = &(view->GetCommander());
@@ -280,6 +280,20 @@ protected:
 	CEditView* m_view;
 	CShareData* m_pCShareData;
 	CViewCommander* m_pCommander;
+};
+
+class COutputAdapterGrepUTF8 final : public COutputAdapterGrep
+{
+public:
+	COutputAdapterGrepUTF8(CEditView* view, BOOL bToEditWindow) : COutputAdapterGrep(view, bToEditWindow)
+		, pcCodeBase(CCodeFactory::CreateCodeBase(CODE_UTF8, 0))
+	{}
+	~COutputAdapterGrepUTF8() {};
+
+	bool OutputA(const ACHAR* pBuf, int size = -1) override;
+
+protected:
+	std::unique_ptr<CCodeBase> pcCodeBase;
 };
 
 void COutputAdapterGrep::OutputBuf(const WCHAR* pBuf, int size)
@@ -318,8 +332,26 @@ bool COutputAdapterGrep::OutputA(const ACHAR* pBuf, int size)
 	return true;
 }
 
-#define RIPGREP_COMMAND L"rg.exe"
+/*
+	@param pBuf size未指定なら要NUL終端
+	@param size ACHAR単位
+*/
+bool COutputAdapterGrepUTF8::OutputA(const ACHAR* pBuf, int size)
+{
+	CMemory input;
+	CNativeW buf;
+	if (-1 == size) {
+		input.SetRawData(pBuf, strlen(pBuf));
+	}
+	else {
+		input.SetRawData(pBuf, size);
+	}
+	pcCodeBase->CodeToUnicode(input, &buf);
+	OutputBuf(buf.GetStringPtr(), (int)buf.GetStringLength());
+	return true;
+}
 
+#define RIPGREP_COMMAND L"rg.exe"
 /* 指定したパスにある適当なファイルのフルパスを返す */
 std::wstring CGrepAgent::getFirstFilePath(const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumFiles& cGrepExceptAbsFiles)
 {
@@ -360,6 +392,8 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool					bGrepBackup
 )
 {
+	this->m_bGrepMode = true;
+
 	// rg.exeのパス取得
 	WCHAR	cmdline[1024];
 	WCHAR	szExeFolder[_MAX_PATH + 1];
@@ -374,7 +408,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	if (sSearchOption.bWordOnly) wcscat(options, L" -w"); //単語単位検索
 
 	// エンコーディング
-	ECodeType outputEncoding;
+	ECodeType outputEncoding = CODE_UTF8;
 	if (IsValidCodeOrCPType(nGrepCharSet)) {
 		WCHAR szCpName[100];
 		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
@@ -448,7 +482,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		wcscat(options, pszCodeName);
 		outputEncoding = nCharCode;
 	}
-	outputEncoding = CODE_SJIS;
 
 	//コマンドライン文字列作成(MAX:1024)
 	WCHAR szCmdDir[_MAX_PATH];
@@ -487,7 +520,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	sui.cb = sizeof(sui);
 
 	sui.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-	sui.wShowWindow = SW_SHOW;
+	sui.wShowWindow = SW_HIDE;
 	sui.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	sui.hStdOutput = hStdOutWrite;
 	sui.hStdError = hStdOutWrite;
@@ -510,7 +543,9 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool	bLoopFlag = true;
 	bool	bCancelEnd = false; // キャンセルでプロセス停止
 
-	COutputAdapter* oa = new COutputAdapterGrep(pcViewDst);
+	COutputAdapter* oa = ( ( outputEncoding == CODE_UTF8 )
+							? new COutputAdapterGrepUTF8(pcViewDst, !bGrepStdout)
+							: new COutputAdapterGrep(pcViewDst, !bGrepStdout) );
 	CDlgCancel cDlgCancel;
 
 	//中断ダイアログ表示
