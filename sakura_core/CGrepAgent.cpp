@@ -369,48 +369,94 @@ std::wstring CGrepAgent::getFirstFilePath(const WCHAR* pszPath, CGrepEnumKeys& c
 
 /* ripgrepでGrep実行 */
 DWORD CGrepAgent::DoGrepRipgrep(
-	CEditView* pcViewDst,
+	CEditView*				pcViewDst,
 	bool					bGrepReplace,
-	const CNativeW* pcmGrepKey,
-	const CNativeW* pcmGrepReplace,
-	const CNativeW* pcmGrepFile,
-	const CNativeW* pcmGrepFolder,
-	const CNativeW* pcmExcludeFile,
-	const CNativeW* pcmExcludeFolder,
+	const CNativeW*			pcmGrepKey,
+	const CNativeW*			pcmGrepReplace,
+	const CNativeW*			pcmGrepFile,
+	const CNativeW*			pcmGrepFolder,
+	const CNativeW*			pcmExcludeFile,
+	const CNativeW*			pcmExcludeFolder,
 	bool					bGrepCurFolder,
 	BOOL					bGrepSubFolder,
 	bool					bGrepStdout,
 	bool					bGrepHeader,
-	const SSearchOption& sSearchOption,
-	ECodeType				nGrepCharSet,	// 2002/09/21 Moca 文字コードセット選択
+	const SSearchOption&	sSearchOption,
+	ECodeType				nGrepCharSet,
 	int						nGrepOutputLineType,
 	int						nGrepOutputStyle,
-	bool					bGrepOutputFileOnly,	//!< [in] ファイル毎最初のみ出力
-	bool					bGrepOutputBaseFolder,	//!< [in] ベースフォルダ表示
-	bool					bGrepSeparateFolder,	//!< [in] フォルダ毎に表示
+	bool					bGrepOutputFileOnly,
+	bool					bGrepOutputBaseFolder,
+	bool					bGrepSeparateFolder,
 	bool					bGrepPaste,
 	bool					bGrepBackup
 )
 {
-	this->m_bGrepMode = true;
+	// 再入不可
+	if( this->m_bGrepRunning ){
+		assert_warning( false == this->m_bGrepRunning );
+		return 0xffffffff;
+	}
+	this->m_bGrepRunning = true;
+	pcViewDst->m_bDoing_UndoRedo = true;
+
+	// アンドゥバッファの処理
+	if( NULL == pcViewDst->GetDocument()->m_cDocEditor.m_pcOpeBlk ){ // 操作ブロック
+		pcViewDst->GetDocument()->m_cDocEditor.m_pcOpeBlk = new COpeBlk;
+		pcViewDst->GetDocument()->m_cDocEditor.m_nOpeBlkRedawCount = 0;
+	}
+	pcViewDst->GetDocument()->m_cDocEditor.m_pcOpeBlk->AddRef();
+
+	pcViewDst->m_bCurSrchKeyMark = true;								// 検索文字列のマーク
+	pcViewDst->m_strCurSearchKey = pcmGrepKey->GetStringPtr();			// 検索文字列
+	pcViewDst->m_sCurSearchOption = sSearchOption;						// 検索オプション
+	pcViewDst->m_nCurSearchKeySequence = GetDllShareData().m_Common.m_sSearch.m_nSearchKeySequence;
+
+	/*
+		Grepを行うに当たって検索・画面色分け用正規表現バッファも
+		初期化する．これはGrep検索結果の色分けを行うため．
+
+		Note: ここで強調するのは最後の検索文字列であって
+		Grep対象パターンではないことに注意
+	*/
+	if( !pcViewDst->m_sSearchPattern.SetPattern(pcViewDst->GetHwnd(), pcViewDst->m_strCurSearchKey.c_str(), pcViewDst->m_strCurSearchKey.size(),
+			pcViewDst->m_sCurSearchOption, &pcViewDst->m_CurRegexp) ){
+		this->m_bGrepRunning = false;
+		pcViewDst->m_bDoing_UndoRedo = false;
+		pcViewDst->SetUndoBuffer();
+		return 0;
+	}
+
+	//別ウィンドウで検索したとき用にGrepダイアログの検索キーを設定
+	pcViewDst->m_pcEditWnd->m_cDlgGrep.m_strText = pcmGrepKey->GetStringPtr();
+	pcViewDst->m_pcEditWnd->m_cDlgGrep.m_bSetText = true;
+	pcViewDst->m_pcEditWnd->m_cDlgGrepReplace.m_strText = pcmGrepKey->GetStringPtr();
+	pcViewDst->m_pcEditWnd->m_cDlgGrepReplace.m_bSetText = true;
+
+	CDlgCancel cDlgCancel;
+	HWND hwndCancel = cDlgCancel.DoModeless( G_AppInstance(), pcViewDst->m_hwndParent, IDD_GREPRUNNING );
+	::SetDlgItemInt( hwndCancel, IDC_STATIC_HITCOUNT, 0, FALSE );
+	::DlgItem_SetText( hwndCancel, IDC_STATIC_CURFILE, L" " );
+	::CheckDlgButton( hwndCancel, IDC_CHECK_REALTIMEVIEW, GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView );
 
 	// rg.exeのパス取得
-	WCHAR	cmdline[1024];
-	WCHAR	szExeFolder[_MAX_PATH + 1];
+	WCHAR cmdline[2048];
+	WCHAR szExeFolder[_MAX_PATH + 1];
 	GetExedir(cmdline, RIPGREP_COMMAND);
 	SplitPath_FolderAndFile(cmdline, szExeFolder, NULL);
 
 	// オプション設定
 	WCHAR options[1024] = { 0 };
-	wcscpy(options, L" --line-number --column"); //デフォルトオプション付加 行数出力
-	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i"); //大文字小文字区別
-	if (!sSearchOption.bRegularExp) wcscat(options, L" -F"); //正規表現使用
-	if (sSearchOption.bWordOnly) wcscat(options, L" -w"); //単語単位検索
+	wcscpy(options, L" --line-number --column");				//デフォルトオプション付加 行数出力
+	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i");		//大文字小文字区別
+	if (!sSearchOption.bRegularExp) wcscat(options, L" -F");	//正規表現使用
+	if (sSearchOption.bWordOnly) wcscat(options, L" -w");		//単語単位検索
 
-	// エンコーディング
+	// エンコーディング設定
 	ECodeType outputEncoding = CODE_UTF8;
 	if (IsValidCodeOrCPType(nGrepCharSet)) {
-		WCHAR szCpName[100];
+		//エンコーディング指定
+		WCHAR szCpName[32];
 		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
 		wcscat(options, L" -E ");
 		wcscat(options, szCpName);
@@ -458,32 +504,22 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		std::wstring lpFileName = getFirstFilePath(currentFile.c_str(), cGrepEnumKeys, cGrepExceptAbsFiles);
 		currentFile += L"\\";
 		currentFile += lpFileName;
-		WCHAR szCpName[100];
 		const STypeConfigMini* type = NULL;
 		if (!CDocTypeManager().GetTypeConfigMini(CDocTypeManager().GetDocumentTypeOfPath(lpFileName.c_str()), &type)) {
 			return -1;
 		}
 		CCodeMediator cmediator(type->m_encoding);
-		ECodeType	nCharCode;
-		const WCHAR* pszCodeName;
-		pszCodeName = L"";
-		nCharCode = cmediator.CheckKanjiCodeOfFile(currentFile.c_str());
-		if (!IsValidCodeOrCPType(nCharCode)) {
-			pszCodeName = L"  [(DetectError)]";
-		}
-		else if (IsValidCodeType(nCharCode)) {
+		ECodeType nCharCode = cmediator.CheckKanjiCodeOfFile(currentFile.c_str());;
+		const WCHAR* pszCodeName = L"";
+		if (IsValidCodeType(nCharCode)) {
 			pszCodeName = CCodeTypeName(nCharCode).Short();
+			wcscat(options, L" -E ");
+			wcscat(options, pszCodeName);
+			outputEncoding = nCharCode;
 		}
-		else {
-			CCodePage::GetNameBracket(szCpName, nCharCode);
-			pszCodeName = szCpName;
-		}
-		wcscat(options, L" -E ");
-		wcscat(options, pszCodeName);
-		outputEncoding = nCharCode;
 	}
 
-	//コマンドライン文字列作成(MAX:1024)
+	//コマンドライン文字列作成
 	WCHAR szCmdDir[_MAX_PATH];
 	::GetSystemDirectory(szCmdDir, _countof(szCmdDir));
 	auto_sprintf(cmdline, L"\"%s\\cmd.exe\" /D /C \"\"%s\\%s\" %s %s %s\"",
@@ -496,20 +532,19 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	);
 
 	//コマンドライン実行
-	HANDLE	hStdOutWrite, hStdOutRead;
+	HANDLE hStdOutWrite, hStdOutRead;
 
 	PROCESS_INFORMATION pi;
 	ZeroMemory(&pi, sizeof(pi));
 
 	//子プロセスの標準出力と接続するパイプを作成
-	SECURITY_ATTRIBUTES	sa;
+	SECURITY_ATTRIBUTES sa;
 	ZeroMemory(&sa, sizeof(sa));
 	sa.nLength = sizeof(sa);
 	sa.bInheritHandle = TRUE;
 	sa.lpSecurityDescriptor = NULL;
 	hStdOutRead = hStdOutWrite = 0;
-	if (CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 1000) == FALSE)
-	{
+	if (CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 1000) == FALSE) {
 		//エラー
 		return false;
 	}
@@ -518,13 +553,14 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	STARTUPINFO sui;
 	ZeroMemory(&sui, sizeof(sui));
 	sui.cb = sizeof(sui);
-
 	sui.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
 	sui.wShowWindow = SW_HIDE;
 	sui.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	sui.hStdOutput = hStdOutWrite;
 	sui.hStdError = hStdOutWrite;
 
+	//Grep開始
+	this->m_bGrepMode = true;
 	BOOL bProcessResult = CreateProcess(
 		NULL,
 		cmdline,
@@ -543,25 +579,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool	bLoopFlag = true;
 	bool	bCancelEnd = false; // キャンセルでプロセス停止
 
-	COutputAdapter* oa = ( ( outputEncoding == CODE_UTF8 )
-							? new COutputAdapterGrepUTF8(pcViewDst, !bGrepStdout)
-							: new COutputAdapterGrep(pcViewDst, !bGrepStdout) );
-	CDlgCancel cDlgCancel;
-
-	//中断ダイアログ表示
-	if (oa->IsEnableRunningDlg()) {
-		cDlgCancel.DoModeless(G_AppInstance(), pcViewDst->m_hwndParent, IDD_GREPRUNNING);
-		// ダイアログにコマンドを表示
-		::DlgItem_SetText(cDlgCancel.GetHwnd(), IDC_STATIC_CMD, pcmGrepKey->GetStringPtr());
-	}
 	//実行したコマンドラインを表示
-	WCHAR szTextDate[1024], szTextTime[1024];
-	SYSTEMTIME systime;
-	::GetLocalTime(&systime);
-	WCHAR szOutTemp[1024 * 2 + 100];
-//	oa->OutputW(L"\r\n");
-//	oa->OutputW(L"#============================================================\r\n");
-//	oa->OutputW(L"#============================================================\r\n");
 	CNativeW cmemMessage;
 	cmemMessage.AllocStringBuffer( 4000 );
 	cmemMessage.AppendString(L"#============================================================\r\n");
@@ -636,9 +654,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 							read_cntw -= 1; // 2010.04.12 1文字余分に消されてた
 							workw[read_cntw] = L'\0';
 						}
-//						if (!oa->OutputW(workw, read_cntw)) {
-//							goto finish;
-//						}
 						cmemMessage.AppendString(workw, read_cntw);
 						AddTail( pcViewDst, cmemMessage, bGrepStdout );
 						cmemMessage._SetStringLength(0);
@@ -693,12 +708,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					//	To Here Jan. 28, 2004 Moca
 					if (j == (int)read_cnt) {	//ぴったり出力できる場合
 						work[read_cnt] = '\0';
-						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-//						if (!oa->OutputA(work, read_cnt)) {
-//							goto finish;
-//						}
-
-						
 						cmemMessage.AppendString((wchar_t*)work, read_cnt);
 						AddTail(pcViewDst, cmemMessage, bGrepStdout);
 						cmemMessage._SetStringLength(0);
@@ -707,10 +716,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					else {
 						char tmp = work[read_cnt - 1];
 						work[read_cnt - 1] = '\0';
-						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-//						if (!oa->OutputA(work, read_cnt - 1)) {
-//							goto finish;
-//						}
 						cmemMessage.AppendString((wchar_t*)work, read_cnt-1);
 						AddTail( pcViewDst, cmemMessage, bGrepStdout );
 						cmemMessage._SetStringLength(0);
@@ -740,10 +745,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					}
 					if (j == (int)read_cnt) {	//ぴったり出力できる場合
 						work[read_cnt] = '\0';
-						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-//						if (!oa->OutputA(work, read_cnt)) {
-//							goto finish;
-//						}
 						CMemory input;
 						CNativeW buf;
 						input.SetRawData(work, read_cnt);
@@ -761,10 +762,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 						int len = read_cnt - j;
 						memcpy(tmp, &work[j], len);
 						work[j] = '\0';
-						//	2006.12.03 maru アウトプットウィンドウor編集中のウィンドウ分岐追加
-//						if (!oa->OutputA(work, j)) {
-//							goto finish;
-//						}
 						cmemMessage.AppendString((wchar_t*)work, j);
 						AddTail( pcViewDst, cmemMessage, bGrepStdout );
 						cmemMessage._SetStringLength(0);
@@ -835,11 +832,13 @@ user_cancel:
 //	}
 
 finish:
+	this->m_bGrepRunning = false;
+	pcViewDst->m_bDoing_UndoRedo = false;
+
 	if (hStdOutWrite) CloseHandle(hStdOutWrite);
 	CloseHandle(hStdOutRead);
 	if (pi.hProcess) CloseHandle(pi.hProcess);
 	if (pi.hThread) CloseHandle(pi.hThread);
-	delete oa;
 
 	return 0;
 }
@@ -878,7 +877,7 @@ DWORD CGrepAgent::DoGrepSakura(
 	bool					bGrepBackup
 )
 {
-	MY_RUNNINGTIMER( cRunningTimer, "CEditView::DoGrep" );
+	MY_RUNNINGTIMER( cRunningTimer, "CEditView::DoGrepSakura" );
 
 	// 再入不可
 	if( this->m_bGrepRunning ){
@@ -1210,7 +1209,6 @@ DWORD CGrepAgent::DoGrepSakura(
 
 	cmemMessage.AppendString( L"\r\n\r\n" );
 	nWork = cmemMessage.GetStringLength();
-	pszWork = cmemMessage.GetStringPtr();
 //@@@ 2002.01.03 YAZAKI Grep直後はカーソルをGrep直前の位置に動かす
 	CLayoutInt tmp_PosY_Layout = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
 	if( 0 < nWork && sGrepOption.bGrepHeader ){
