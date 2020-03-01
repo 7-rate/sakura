@@ -258,113 +258,45 @@ DWORD CGrepAgent::DoGrep(
 	return ret;
 }
 
-
-class COutputAdapterGrep : public COutputAdapter
-{
-public:
-	COutputAdapterGrep(CEditView* view, BOOL bToEditWindow) : m_bWindow(bToEditWindow), m_view(view)
-	{
-		m_pCShareData = CShareData::getInstance();
-		m_pCommander = &(view->GetCommander());
-	}
-	~COutputAdapterGrep() {};
-
-	bool OutputW(const WCHAR* pBuf, int size = -1) override;
-	bool OutputA(const ACHAR* pBuf, int size = -1) override;
-	bool IsActiveDebugWindow() { return FALSE == m_bWindow; }
-
-protected:
-	void OutputBuf(const WCHAR* pBuf, int size);
-
-	BOOL m_bWindow;
-	CEditView* m_view;
-	CShareData* m_pCShareData;
-	CViewCommander* m_pCommander;
-};
-
-class COutputAdapterGrepUTF8 final : public COutputAdapterGrep
-{
-public:
-	COutputAdapterGrepUTF8(CEditView* view, BOOL bToEditWindow) : COutputAdapterGrep(view, bToEditWindow)
-		, pcCodeBase(CCodeFactory::CreateCodeBase(CODE_UTF8, 0))
-	{}
-	~COutputAdapterGrepUTF8() {};
-
-	bool OutputA(const ACHAR* pBuf, int size = -1) override;
-
-protected:
-	std::unique_ptr<CCodeBase> pcCodeBase;
-};
-
-void COutputAdapterGrep::OutputBuf(const WCHAR* pBuf, int size)
-{
-	if (m_bWindow) {
-		m_pCommander->Command_INSTEXT(false, pBuf, CLogicInt(size), true);
-	}
-	else {
-		m_pCShareData->TraceOutString(pBuf, size);
-	}
-}
-
-bool COutputAdapterGrep::OutputW(const WCHAR* pBuf, int size)
-{
-	OutputBuf(pBuf, size);
-	return true;
-}
-
-/*
-	@param pBuf size未指定なら要NUL終端
-	@param size ACHAR単位
-*/
-bool COutputAdapterGrep::OutputA(const ACHAR* pBuf, int size)
-{
-	CNativeA input;
-	CNativeW buf;
-	if (-1 == size) {
-		input.SetString(pBuf);
-	}
-	else {
-		input.SetString(pBuf, size);
-	}
-	auto pcCodeBase = std::unique_ptr<CCodeBase>(CCodeFactory::CreateCodeBase(ECodeType::CODE_SJIS, 0));
-	pcCodeBase->CodeToUnicode(*input._GetMemory(), &buf);
-	OutputBuf(buf.GetStringPtr(), (int)buf.GetStringLength());
-	return true;
-}
-
-/*
-	@param pBuf size未指定なら要NUL終端
-	@param size ACHAR単位
-*/
-bool COutputAdapterGrepUTF8::OutputA(const ACHAR* pBuf, int size)
-{
-	CMemory input;
-	CNativeW buf;
-	if (-1 == size) {
-		input.SetRawData(pBuf, strlen(pBuf));
-	}
-	else {
-		input.SetRawData(pBuf, size);
-	}
-	pcCodeBase->CodeToUnicode(input, &buf);
-	OutputBuf(buf.GetStringPtr(), (int)buf.GetStringLength());
-	return true;
-}
-
-#define RIPGREP_COMMAND L"rg.exe"
 /* 指定したパスにある適当なファイルのフルパスを返す */
-std::wstring CGrepAgent::getFirstFilePath(const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumFiles& cGrepExceptAbsFiles)
+std::wstring CGrepAgent::GetFirstFilePath(
+	const WCHAR*			pszPath,
+	CGrepEnumKeys&			cGrepEnumKeys,
+	CGrepEnumOptions&		cGrepEnumOptions
+)
 {
-	std::wstring lpFileName = L"";
+	//適当なファイル検索
+	CGrepEnumFiles cGrepExceptAbsFiles;
+	cGrepExceptAbsFiles.Enumerates(L"", cGrepEnumKeys.m_vecExceptAbsFileKeys, cGrepEnumOptions);
 
-	CGrepEnumOptions cGrepEnumOptions;
 	CGrepEnumFilterFiles cGrepEnumFilterFiles;
 	cGrepEnumFilterFiles.Enumerates(pszPath, cGrepEnumKeys, cGrepEnumOptions, cGrepExceptAbsFiles);
 
-	int count = cGrepEnumFilterFiles.GetCount();
-	lpFileName = cGrepEnumFilterFiles.GetFileName(0);
+	if ( cGrepEnumFilterFiles.GetCount() != 0 ) {
+		return cGrepEnumFilterFiles.GetFileName(0);
+	}
 
-	return lpFileName;
+	//pszPathに適当なファイルが無ければサブディレクトリから検索
+	CGrepEnumFolders cGrepExceptAbsFolders;
+	cGrepExceptAbsFolders.Enumerates(L"", cGrepEnumKeys.m_vecExceptAbsFolderKeys, cGrepEnumOptions);
+
+	CGrepEnumFilterFolders cGrepEnumFilterFolders;
+	cGrepEnumFilterFolders.Enumerates( pszPath, cGrepEnumKeys, cGrepEnumOptions, cGrepExceptAbsFolders );
+
+	for ( int i = 0; i < cGrepEnumFilterFolders.GetCount(); i++ ) {
+		std::wstring folderName = cGrepEnumFilterFolders.GetFileName(i);
+		std::wstring currentPath = pszPath;
+		currentPath += L"\\";
+		currentPath += folderName;
+		std::wstring fileName = GetFirstFilePath(currentPath.c_str(), cGrepEnumKeys, cGrepEnumOptions);
+		if (!fileName.empty()) {
+			folderName += L"\\";
+			folderName += fileName;
+			return folderName;
+		}
+	}
+
+	return L"";
 }
 
 /* ripgrepでGrep実行 */
@@ -392,6 +324,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool					bGrepBackup
 )
 {
+#define RIPGREP_COMMAND L"rg.exe"
 	// 再入不可
 	if( this->m_bGrepRunning ){
 		assert_warning( false == this->m_bGrepRunning );
@@ -452,6 +385,51 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	if (!sSearchOption.bRegularExp) wcscat(options, L" -F");	//正規表現使用
 	if (sSearchOption.bWordOnly) wcscat(options, L" -w");		//単語単位検索
 
+	// 検索対象のファイル拡張子設定
+	const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
+	CGrepEnumKeys cGrepEnumKeys;
+	int nErrorNo = cGrepEnumKeys.SetFileKeys(pcmGrepFile->GetStringPtr());
+	int nErrorNo_ExcludeFile = cGrepEnumKeys.AddExceptFile(pcmExcludeFile->GetStringPtr());
+	int nErrorNo_ExcludeFolder = cGrepEnumKeys.AddExceptFolder(pcmExcludeFolder->GetStringPtr());
+	if (nErrorNo != 0 || nErrorNo_ExcludeFile != 0 || nErrorNo_ExcludeFolder != 0) {
+		this->m_bGrepRunning = false;
+		pcViewDst->m_bDoing_UndoRedo = false;
+		pcViewDst->SetUndoBuffer();
+
+		const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
+		if (nErrorNo == 1) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+		}
+		else if (nErrorNo == 2) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+		}
+		else if (nErrorNo_ExcludeFile == 1) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+		}
+		else if (nErrorNo_ExcludeFile == 2) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+		}
+		else if (nErrorNo_ExcludeFolder == 1) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+		}
+		else if (nErrorNo_ExcludeFolder == 2) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+		}
+		ErrorMessage(pcViewDst->m_hwndParent, L"%s", pszErrorMessage);
+		return 0;
+	}
+	for (auto key : cGrepEnumKeys.m_vecSearchFileKeys) {
+		wcscat(options, L" -g \"");
+		wcscat(options, key);
+		wcscat(options, L"\"");
+	}
+
+	for (auto key : cGrepEnumKeys.m_vecExceptFileKeys) {
+		wcscat(options, L" -g \"!");
+		wcscat(options, key);
+		wcscat(options, L"\"");
+	}
+
 	// エンコーディング設定
 	ECodeType outputEncoding = CODE_UTF8;
 	if (IsValidCodeOrCPType(nGrepCharSet)) {
@@ -464,44 +442,11 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	}
 	else {
 		// エンコーディング自動判別
-		CGrepEnumKeys cGrepEnumKeys;
-		{
-			int nErrorNo = cGrepEnumKeys.SetFileKeys(pcmGrepFile->GetStringPtr());
-			int nErrorNo_ExcludeFile = cGrepEnumKeys.AddExceptFile(pcmExcludeFile->GetStringPtr());
-			int nErrorNo_ExcludeFolder = cGrepEnumKeys.AddExceptFolder(pcmExcludeFolder->GetStringPtr());
-			if (nErrorNo != 0 || nErrorNo_ExcludeFile != 0 || nErrorNo_ExcludeFolder != 0) {
-				this->m_bGrepRunning = false;
-				pcViewDst->m_bDoing_UndoRedo = false;
-				pcViewDst->SetUndoBuffer();
-
-				const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
-				if (nErrorNo == 1) {
-					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
-				}
-				else if (nErrorNo == 2) {
-					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
-				}
-				else if (nErrorNo_ExcludeFile == 1) {
-					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
-				}
-				else if (nErrorNo_ExcludeFile == 2) {
-					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
-				}
-				else if (nErrorNo_ExcludeFolder == 1) {
-					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
-				}
-				else if (nErrorNo_ExcludeFolder == 2) {
-					pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
-				}
-				ErrorMessage(pcViewDst->m_hwndParent, L"%s", pszErrorMessage);
-				return 0;
-			}
-		}
 		CGrepEnumOptions cGrepEnumOptions;
-		CGrepEnumFiles cGrepExceptAbsFiles;
-		cGrepExceptAbsFiles.Enumerates(L"", cGrepEnumKeys.m_vecExceptAbsFileKeys, cGrepEnumOptions);
+//		CGrepEnumFiles cGrepExceptAbsFiles;
+//		cGrepExceptAbsFiles.Enumerates(L"", cGrepEnumKeys.m_vecExceptAbsFileKeys, cGrepEnumOptions);
 		std::wstring currentFile = pcmGrepFolder->GetStringPtr();
-		std::wstring lpFileName = getFirstFilePath(currentFile.c_str(), cGrepEnumKeys, cGrepExceptAbsFiles);
+		std::wstring lpFileName = GetFirstFilePath(currentFile.c_str(), cGrepEnumKeys, cGrepEnumOptions);
 		currentFile += L"\\";
 		currentFile += lpFileName;
 		const STypeConfigMini* type = NULL;
@@ -579,13 +524,29 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool	bLoopFlag = true;
 	bool	bCancelEnd = false; // キャンセルでプロセス停止
 
+	//	CEditWndに新設した関数を使うように
+	HICON	hIconBig, hIconSmall;
+	hIconBig   = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, false );
+	hIconSmall = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, true );
+
+	CEditWnd*	pCEditWnd = CEditWnd::getInstance();	//	Sep. 10, 2002 genta
+	pCEditWnd->SetWindowIcon( hIconSmall, ICON_SMALL );
+	pCEditWnd->SetWindowIcon( hIconBig, ICON_BIG );
+
 	//実行したコマンドラインを表示
 	CNativeW cmemMessage;
 	cmemMessage.AllocStringBuffer( 4000 );
 	cmemMessage.AppendString(L"#============================================================\r\n");
+	cmemMessage.AppendString(cmdline);
+	cmemMessage.AppendString(L"\r\n");
 	cmemMessage.AppendString(L"#============================================================\r\n");
 	AddTail( pcViewDst, cmemMessage, bGrepStdout );
 	cmemMessage._SetStringLength(0);
+
+	//@@@ 2002.01.03 YAZAKI Grep直後はカーソルをGrep直前の位置に動かす
+	CLayoutInt tmp_PosY_Layout = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+
+	const bool bDrawSwitchOld = pcViewDst->SetDrawSwitch(0 != GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView);
 
 	typedef char PIPE_CHAR;
 	const int WORK_NULL_TERMS = sizeof(wchar_t); // 出力用\0の分
@@ -635,142 +596,49 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					break;
 				}
 
-				if (outputEncoding == CODE_UNICODE) {
-					wchar_t* workw;
-					int			read_cntw;
-					bool		bCarry;
-					char		byteCarry = 0;
-					workw = (wchar_t*)work;
-					read_cntw = (int)read_cnt / sizeof(wchar_t);
-					if (read_cnt % (int)sizeof(wchar_t)) {
-						byteCarry = work[read_cnt - 1];
+				int		j;
+				int checklen = 0;
+				for (j = 0; j < (int)read_cnt;) {
+					ECharSet echarset;
+					checklen = CheckUtf8Char2(work + j, read_cnt - j, &echarset, true, 0);
+					if (echarset == CHARSET_BINARY2) {
+						break;
 					}
-					if (read_cntw) {
-						workw[read_cntw] = L'\0';
-						bCarry = false;
-						//読み出した文字列をチェックする
-						if (workw[read_cntw - 1] == L'\r') {
-							bCarry = true;
-							read_cntw -= 1; // 2010.04.12 1文字余分に消されてた
-							workw[read_cntw] = L'\0';
-						}
-						cmemMessage.AppendString(workw, read_cntw);
-						AddTail( pcViewDst, cmemMessage, bGrepStdout );
-						cmemMessage._SetStringLength(0);
-
-						bufidx = 0;
-						if (bCarry) {
-							workw[0] = L'\r'; // 2010.04.12 'r' -> '\r'
-							bufidx = sizeof(wchar_t);
-							DEBUG_TRACE(L"ExecCmd: Carry last character [CR]\n");
-						}
-					}
-					if (read_cnt % (int)sizeof(wchar_t)) {
-						// 高確率で0だと思うが1だと困る
-						DEBUG_TRACE(L"ExecCmd: Carry Unicode 1byte [%x]\n", byteCarry);
-						work[bufidx] = byteCarry;
-						bufidx += 1;
-					}
-				}
-				// end 2008/6/8 Uchi
-				else if (outputEncoding == CODE_SJIS) {
-					//読み出した文字列をチェックする
-					// \r\n を \r だけとか漢字の第一バイトだけを出力するのを防ぐ必要がある
-					//@@@ 2002.1.24 YAZAKI 1バイト取りこぼす可能性があった。
-					//	Jan. 28, 2004 Moca 最後の文字はあとでチェックする
-					int		j;
-					for (j = 0; j < (int)read_cnt - 1; j++) {
-						//	2007.09.10 ryoji
-						if (CShiftJis::GetSizeOfChar(work, read_cnt, j) == 2) {
-							j++;
-						}
-						else {
-							if (work[j] == _T2(PIPE_CHAR, '\r') && work[j + 1] == _T2(PIPE_CHAR, '\n')) {
-								j++;
-							}
-						}
-					}
-					//	From Here Jan. 28, 2004 Moca
-					//	改行コードが分割されるのを防ぐ
-					if ((DWORD)j == read_cnt - 1) {
-						if (_IS_SJIS_1(work[j])) {
-							j = read_cnt + 1; // ぴったり出力できないことを主張
-						}
-						else if (work[j] == _T2(PIPE_CHAR, '\r')) {
-							// CRLFの一部ではない改行が末尾にある
-							// 次の読み込みで、CRLFの一部になる可能性がある
-							j = read_cnt + 1;
-						}
-						else {
-							j = read_cnt;
-						}
-					}
-					//	To Here Jan. 28, 2004 Moca
-					if (j == (int)read_cnt) {	//ぴったり出力できる場合
-						work[read_cnt] = '\0';
-						cmemMessage.AppendString((wchar_t*)work, read_cnt);
-						AddTail(pcViewDst, cmemMessage, bGrepStdout);
-						cmemMessage._SetStringLength(0);
-						bufidx = 0;
+					else if (read_cnt - 1 == j && work[j] == _T2(PIPE_CHAR, '\r')) {
+						// CRLFの一部ではない改行が末尾にある
+						// 次の読み込みで、CRLFの一部になる可能性がある
+						break;
 					}
 					else {
-						char tmp = work[read_cnt - 1];
-						work[read_cnt - 1] = '\0';
-						cmemMessage.AppendString((wchar_t*)work, read_cnt-1);
-						AddTail( pcViewDst, cmemMessage, bGrepStdout );
-						cmemMessage._SetStringLength(0);
-
-						work[0] = tmp;
-						bufidx = 1;
-						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp);
+						j += checklen;
 					}
 				}
-				else if (outputEncoding == CODE_UTF8) {
-					int		j;
-					int checklen = 0;
-					for (j = 0; j < (int)read_cnt;) {
-						ECharSet echarset;
-						checklen = CheckUtf8Char2(work + j, read_cnt - j, &echarset, true, 0);
-						if (echarset == CHARSET_BINARY2) {
-							break;
-						}
-						else if (read_cnt - 1 == j && work[j] == _T2(PIPE_CHAR, '\r')) {
-							// CRLFの一部ではない改行が末尾にある
-							// 次の読み込みで、CRLFの一部になる可能性がある
-							break;
-						}
-						else {
-							j += checklen;
-						}
-					}
-					if (j == (int)read_cnt) {	//ぴったり出力できる場合
-						work[read_cnt] = '\0';
-						CMemory input;
-						CNativeW buf;
-						input.SetRawData(work, read_cnt);
-						CCodeBase* pcCodeBase = CCodeFactory::CreateCodeBase(CODE_UTF8, 0);
-						pcCodeBase->CodeToUnicode(input, &buf);
+				if (j == (int)read_cnt) {	//ぴったり出力できる場合
+					work[read_cnt] = '\0';
+					CMemory input;
+					CNativeW buf;
+					input.SetRawData(work, read_cnt);
+					CCodeBase* pcCodeBase = CCodeFactory::CreateCodeBase(CODE_UTF8, 0);
+					pcCodeBase->CodeToUnicode(input, &buf);
 
-						cmemMessage.AppendString(buf.GetStringPtr(), buf.GetStringLength());
-						AddTail( pcViewDst, cmemMessage, bGrepStdout );
-						cmemMessage._SetStringLength(0);
-						bufidx = 0;
-					}
-					else {
-						DEBUG_TRACE(L"read_cnt %d j %d\n", read_cnt, j);
-						char tmp[5];
-						int len = read_cnt - j;
-						memcpy(tmp, &work[j], len);
-						work[j] = '\0';
-						cmemMessage.AppendString((wchar_t*)work, j);
-						AddTail( pcViewDst, cmemMessage, bGrepStdout );
-						cmemMessage._SetStringLength(0);
-						memcpy(work, tmp, len);
-						bufidx = len;
-						DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp[0]);
-					}
+					cmemMessage.AppendString(buf.GetStringPtr(), buf.GetStringLength());
+					AddTail( pcViewDst, cmemMessage, bGrepStdout );
+					cmemMessage._SetStringLength(0);
+					bufidx = 0;
 				}
-
+				else {
+					DEBUG_TRACE(L"read_cnt %d j %d\n", read_cnt, j);
+					char tmp[5];
+					int len = read_cnt - j;
+					memcpy(tmp, &work[j], len);
+					work[j] = '\0';
+					cmemMessage.AppendString((wchar_t*)work, j);
+					AddTail( pcViewDst, cmemMessage, bGrepStdout );
+					cmemMessage._SetStringLength(0);
+					memcpy(work, tmp, len);
+					bufidx = len;
+					DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp[0]);
+				}
 
 				// 子プロセスの出力をどんどん受け取らないと子プロセスが
 				// 停止してしまうため，バッファが空になるまでどんどん読み出す．
@@ -832,8 +700,25 @@ user_cancel:
 //	}
 
 finish:
+	pcViewDst->GetCaret().MoveCursor( CLayoutPoint(CLayoutInt(0), tmp_PosY_Layout), true );	//	カーソルをGrep直前の位置に戻す。
+
+	cDlgCancel.CloseDialog( 0 );
+
+	/* アクティブにする */
+	ActivateFrameWindow( CEditWnd::getInstance()->GetHwnd() );
+	
+	//	Grep実行後はファイルを変更無しの状態にする．
+	pcViewDst->m_pcEditDoc->m_cDocEditor.SetModified(false,false);
+
 	this->m_bGrepRunning = false;
 	pcViewDst->m_bDoing_UndoRedo = false;
+
+	/* 表示処理ON/OFF */
+	pCEditWnd->SetDrawSwitchOfAllViews( bDrawSwitchOld );
+
+	/* 再描画 */
+	if( !pCEditWnd->UpdateTextWrap() )	// 折り返し方法関連の更新	// 2008.06.10 ryoji
+		pCEditWnd->RedrawAllViews( NULL );
 
 	if (hStdOutWrite) CloseHandle(hStdOutWrite);
 	CloseHandle(hStdOutRead);

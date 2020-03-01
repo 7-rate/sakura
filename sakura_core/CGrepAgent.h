@@ -31,6 +31,7 @@ class CSearchStringPattern;
 class CGrepEnumKeys;
 class CGrepEnumFiles;
 class CGrepEnumFolders;
+class CGrepEnumOptions;
 
 struct SGrepOption{
 	bool		bGrepReplace;			//!< Grep置換
@@ -103,7 +104,8 @@ public:
 	);
 
 private:
-	std::wstring getFirstFilePath(const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumFiles& cGrepExceptAbsFiles);
+	std::wstring GetFirstFilePath( const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumOptions& cGrepEnumOptions );
+
 	// Grep実行(ripgrep)
 	DWORD DoGrepRipgrep(
 		CEditView* pcViewDst,
