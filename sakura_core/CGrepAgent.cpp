@@ -505,6 +505,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	sui.hStdError = hStdOutWrite;
 
 	//Grep開始
+	wcsncpy_s( CAppMode::getInstance()->m_szGrepKey, _countof(CAppMode::getInstance()->m_szGrepKey), pcmGrepKey->GetStringPtr(), _TRUNCATE );
 	this->m_bGrepMode = true;
 	BOOL bProcessResult = CreateProcess(
 		NULL,
