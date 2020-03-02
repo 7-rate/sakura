@@ -537,15 +537,98 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	//実行したコマンドラインを表示
 	CNativeW cmemMessage;
 	cmemMessage.AllocStringBuffer( 4000 );
-	cmemMessage.AppendString(L"#============================================================\r\n");
-	cmemMessage.AppendString(cmdline);
-	cmemMessage.AppendString(L"\r\n");
-	cmemMessage.AppendString(L"#============================================================\r\n");
-	AddTail( pcViewDst, cmemMessage, bGrepStdout );
-	cmemMessage._SetStringLength(0);
+	const STypeConfig& type = pcViewDst->m_pcEditDoc->m_cDocType.GetDocumentAttribute();
 
-	//@@@ 2002.01.03 YAZAKI Grep直後はカーソルをGrep直前の位置に動かす
+	std::vector<std::wstring> vPaths;
+	CreateFolders( pcmGrepFolder->GetStringPtr(), vPaths );
+	cmemMessage.AppendString( LS( STR_GREP_SEARCH_CONDITION ) );	//L"\r\n□検索条件  "
+	int nWork = pcmGrepKey->GetStringLength();
+	if( 0 < nWork ){
+		cmemMessage.AppendString( L"\"" );
+		cmemMessage += EscapeStringLiteral(type, *pcmGrepKey);
+		cmemMessage.AppendString( L"\"\r\n" );
+	}else{
+		cmemMessage.AppendString( LS( STR_GREP_SEARCH_FILE ) );	//L"「ファイル検索」\r\n"
+	}
+
+	cmemMessage.AppendString( LS( STR_GREP_SEARCH_TARGET ) );	//L"検索対象   "
+	cmemMessage.AppendString( pcmGrepFile->GetStringPtr() );
+	cmemMessage.AppendString( L"\r\n" );
+
+	cmemMessage.AppendString( LS( STR_GREP_SEARCH_FOLDER ) );	//L"フォルダ   "
+	{
+		std::wstring grepFolder;
+		for( int i = 0; i < (int)vPaths.size(); i++ ){
+			// パスリストは ':' で区切る(2つ目以降の前に付加する)
+			if( i ){
+				grepFolder += L';';
+			}
+			// 末尾のバックスラッシュを削る
+			std::wstring sPath = ChopYen( vPaths[i] );
+
+			// ';' を含むパス名は引用符で囲む
+			if( auto_strchr( sPath.c_str(), L';' ) ){
+				grepFolder += L'"';
+				grepFolder += sPath;
+				grepFolder += L'"';
+			}else{
+				grepFolder += sPath;
+			}
+		}
+		cmemMessage.AppendString( grepFolder.c_str() );
+	}
+	cmemMessage.AppendString( L"\r\n" );
+
+	cmemMessage.AppendString(LS(STR_GREP_EXCLUDE_FILE));	//L"除外ファイル   "
+	cmemMessage.AppendString( pcmExcludeFile->GetStringPtr() );
+	cmemMessage.AppendString(L"\r\n");
+
+	cmemMessage.AppendString(LS(STR_GREP_EXCLUDE_FOLDER));	//L"除外フォルダ   "
+	cmemMessage.AppendString( pcmExcludeFolder->GetStringPtr() );
+	cmemMessage.AppendString(L"\r\n");
+
+	const wchar_t*	pszWork;
+	pszWork = LS( STR_GREP_SUBFOLDER_YES );	//L"    (サブフォルダも検索)\r\n"
+	cmemMessage.AppendString( pszWork );
+
+	if( 0 < nWork ){ // 2003.06.10 Moca ファイル検索の場合は表示しない // 2004.09.26 条件誤り修正
+		if( sSearchOption.bWordOnly ){
+		/* 単語単位で探す */
+			cmemMessage.AppendString( LS( STR_GREP_COMPLETE_WORD ) );	//L"    (単語単位で探す)\r\n"
+		}
+
+		if( sSearchOption.bLoHiCase ){
+			pszWork = LS( STR_GREP_CASE_SENSITIVE );	//L"    (英大文字小文字を区別する)\r\n"
+		}else{
+			pszWork = LS( STR_GREP_IGNORE_CASE );	//L"    (英大文字小文字を区別しない)\r\n"
+		}
+		cmemMessage.AppendString( pszWork );
+
+		//正規表現ライブラリのバージョンも出力する
+		cmemMessage.AppendString( LS( STR_GREP_REGEX_DLL ) );	//L"    (正規表現:"
+		cmemMessage.AppendString( L"ripgrep" );
+		cmemMessage.AppendString( L")\r\n" );
+	}
+
+	if( CODE_AUTODETECT == nGrepCharSet ){
+		cmemMessage.AppendString( LS( STR_GREP_CHARSET_AUTODETECT ) );	//L"    (文字コードセットの自動判別)\r\n"
+	}else if(IsValidCodeOrCPType(nGrepCharSet)){
+		cmemMessage.AppendString( LS( STR_GREP_CHARSET ) );	//L"    (文字コードセット："
+		WCHAR szCpName[100];
+		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
+		cmemMessage.AppendString( szCpName );
+		cmemMessage.AppendString( L")\r\n" );
+	}
+
+	cmemMessage.AppendString( L"\r\n\r\n" );
+	nWork = cmemMessage.GetStringLength();
+//@@@ 2002.01.03 YAZAKI Grep直後はカーソルをGrep直前の位置に動かす
 	CLayoutInt tmp_PosY_Layout = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+	if( 0 < nWork && bGrepHeader ){
+		AddTail( pcViewDst, cmemMessage, bGrepStdout );
+	}
+	cmemMessage._SetStringLength(0);
+	pszWork = NULL;
 
 	const bool bDrawSwitchOld = pcViewDst->SetDrawSwitch(0 != GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView);
 
