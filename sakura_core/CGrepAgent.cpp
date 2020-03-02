@@ -204,7 +204,7 @@ DWORD CGrepAgent::DoGrep(
 {
 	DWORD ret;
 
-	if ( bUseRipgrep) {
+	if ( bUseRipgrep && !bGrepReplace) {
 		ret = DoGrepRipgrep(
 			pcViewDst,
 			bGrepReplace,
@@ -443,8 +443,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	else {
 		// エンコーディング自動判別
 		CGrepEnumOptions cGrepEnumOptions;
-//		CGrepEnumFiles cGrepExceptAbsFiles;
-//		cGrepExceptAbsFiles.Enumerates(L"", cGrepEnumKeys.m_vecExceptAbsFileKeys, cGrepEnumOptions);
 		std::wstring currentFile = pcmGrepFolder->GetStringPtr();
 		std::wstring lpFileName = GetFirstFilePath(currentFile.c_str(), cGrepEnumKeys, cGrepEnumOptions);
 		currentFile += L"\\";
@@ -476,9 +474,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		pcmGrepFolder->GetStringPtr()
 	);
 
-	//コマンドライン実行
 	HANDLE hStdOutWrite, hStdOutRead;
-
 	PROCESS_INFORMATION pi;
 	ZeroMemory(&pi, sizeof(pi));
 
@@ -490,8 +486,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	sa.lpSecurityDescriptor = NULL;
 	hStdOutRead = hStdOutWrite = 0;
 	if (CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 1000) == FALSE) {
-		//エラー
-		return false;
+		return -1;
 	}
 
 	//CreateProcessに渡すSTARTUPINFOを作成
@@ -525,12 +520,12 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool	bLoopFlag = true;
 	bool	bCancelEnd = false; // キャンセルでプロセス停止
 
-	//	CEditWndに新設した関数を使うように
-	HICON	hIconBig, hIconSmall;
-	hIconBig   = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, false );
+	// CEditWndに新設した関数を使うように
+	HICON hIconBig, hIconSmall;
+	hIconBig = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, false );
 	hIconSmall = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, true );
 
-	CEditWnd*	pCEditWnd = CEditWnd::getInstance();	//	Sep. 10, 2002 genta
+	CEditWnd* pCEditWnd = CEditWnd::getInstance();
 	pCEditWnd->SetWindowIcon( hIconSmall, ICON_SMALL );
 	pCEditWnd->SetWindowIcon( hIconBig, ICON_BIG );
 
@@ -622,7 +617,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 
 	cmemMessage.AppendString( L"\r\n\r\n" );
 	nWork = cmemMessage.GetStringLength();
-//@@@ 2002.01.03 YAZAKI Grep直後はカーソルをGrep直前の位置に動かす
+	// Grep開始時のカーソル位置を保持(Grep後にカーソル位置を戻すため)
 	CLayoutInt tmp_PosY_Layout = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
 	if( 0 < nWork && bGrepHeader ){
 		AddTail( pcViewDst, cmemMessage, bGrepStdout );
@@ -637,6 +632,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	const int MAX_BUFIDX = 10; // bufidxの分
 	const DWORD MAX_WORK_READ = 1024 * 5; // 5KiB ReadFileで読み込む限界値
 	PIPE_CHAR work[MAX_WORK_READ + MAX_BUFIDX + WORK_NULL_TERMS];
+
 	//実行結果の取り込み
 	do {
 		switch (MsgWaitForMultipleObjects(1, &pi.hProcess, FALSE, 20, QS_ALLEVENTS)) {
@@ -666,9 +662,8 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		new_cnt = 0;
 
 		if (PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {	//パイプの中の読み出し待機中の文字数を取得
-			while (new_cnt > 0) {												//待機中のものがある
-
-				if (new_cnt > MAX_WORK_READ) {							//パイプから読み出す量を調整
+			while (new_cnt > 0) {
+				if (new_cnt > MAX_WORK_READ) {	//パイプから読み出す量を調整
 					new_cnt = MAX_WORK_READ;
 				}
 				DWORD	read_cnt = 0;
@@ -676,7 +671,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 				read_cnt += bufidx;													//work内の実際のサイズにする
 
 				if (read_cnt == 0) {
-					// Jan. 23, 2004 genta while追加のため制御を変更
 					break;
 				}
 
@@ -754,54 +748,32 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	} while (bLoopFlag || new_cnt > 0);
 
 user_cancel:
-
-//	// 最後の文字の出力(たいていCR)
-//	if (0 < bufidx) {
-//		{ //UTF-8
-//			work[bufidx] = '\0';
-//			oa->OutputA(work, bufidx);
-//		}
-//	}
-
-//	if (bCancelEnd) {
-//		//	2006.12.03 maru アウトプットウィンドウにのみ出力
-//		//最後にテキストを追加
-//		oa->OutputW(LS(STR_EDITVIEW_EXECCMD_STOP));
-//	}
-
-//	{
-//		//	2006.12.03 maru アウトプットウィンドウにのみ出力
-//		//	Jun. 04, 2003 genta	終了コードの取得と出力
-//		DWORD result;
-//		::GetExitCodeProcess(pi.hProcess, &result);
-//		WCHAR endCode[128];
-//		auto_sprintf(endCode, LS(STR_EDITVIEW_EXECCMD_RET), result);
-//		oa->OutputW(endCode);
-//		// 2004.09.20 naoh 終了コードが1以上の時はアウトプットをアクティブにする
-//		if (result > 0 && oa->IsActiveDebugWindow()) {
-//			ActivateFrameWindow(GetDllShareData().m_sHandles.m_hwndDebug);
-//		}
-//	}
+	if( bCancelEnd && bGrepHeader ){
+		const wchar_t* p = LS( STR_GREP_SUSPENDED );	//L"中断しました。\r\n"
+		CNativeW cmemSuspend;
+		cmemSuspend.SetString( p );
+		AddTail( pcViewDst, cmemSuspend, bGrepStdout );
+	}
 
 finish:
 	pcViewDst->GetCaret().MoveCursor( CLayoutPoint(CLayoutInt(0), tmp_PosY_Layout), true );	//	カーソルをGrep直前の位置に戻す。
 
 	cDlgCancel.CloseDialog( 0 );
 
-	/* アクティブにする */
+	// アクティブにする
 	ActivateFrameWindow( CEditWnd::getInstance()->GetHwnd() );
 	
-	//	Grep実行後はファイルを変更無しの状態にする．
+	// Grep実行後はファイルを変更無しの状態にする
 	pcViewDst->m_pcEditDoc->m_cDocEditor.SetModified(false,false);
 
 	this->m_bGrepRunning = false;
 	pcViewDst->m_bDoing_UndoRedo = false;
 
-	/* 表示処理ON/OFF */
+	// 表示処理ON/OFF
 	pCEditWnd->SetDrawSwitchOfAllViews( bDrawSwitchOld );
 
-	/* 再描画 */
-	if( !pCEditWnd->UpdateTextWrap() )	// 折り返し方法関連の更新	// 2008.06.10 ryoji
+	// 再描画 
+	if( !pCEditWnd->UpdateTextWrap() )	// 折り返し方法関連の更新
 		pCEditWnd->RedrawAllViews( NULL );
 
 	if (hStdOutWrite) CloseHandle(hStdOutWrite);
