@@ -418,12 +418,14 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		ErrorMessage(pcViewDst->m_hwndParent, L"%s", pszErrorMessage);
 		return 0;
 	}
+	// 検索対象ファイル
 	for (auto key : cGrepEnumKeys.m_vecSearchFileKeys) {
 		wcscat(options, L" -g \"");
 		wcscat(options, key);
 		wcscat(options, L"\"");
 	}
 
+	// 検索除外ファイル
 	for (auto key : cGrepEnumKeys.m_vecExceptFileKeys) {
 		wcscat(options, L" -g \"!");
 		wcscat(options, key);
@@ -431,14 +433,12 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	}
 
 	// エンコーディング設定
-	ECodeType outputEncoding = CODE_UTF8;
 	if (IsValidCodeOrCPType(nGrepCharSet)) {
 		//エンコーディング指定
 		WCHAR szCpName[32];
 		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
 		wcscat(options, L" -E ");
 		wcscat(options, szCpName);
-		outputEncoding = nGrepCharSet;
 	}
 	else {
 		// エンコーディング自動判別
@@ -458,7 +458,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 			pszCodeName = CCodeTypeName(nCharCode).Short();
 			wcscat(options, L" -E ");
 			wcscat(options, pszCodeName);
-			outputEncoding = nCharCode;
 		}
 	}
 
@@ -515,21 +514,17 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		&pi
 	);
 
-	DWORD	new_cnt;
-	int		bufidx = 0;
-	bool	bLoopFlag = true;
-	bool	bCancelEnd = false; // キャンセルでプロセス停止
-
 	// CEditWndに新設した関数を使うように
 	HICON hIconBig, hIconSmall;
 	hIconBig = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, false );
 	hIconSmall = GetAppIcon( G_AppInstance(), ICON_DEFAULT_GREP, FN_GREP_ICON, true );
 
+	// アイコン設定
 	CEditWnd* pCEditWnd = CEditWnd::getInstance();
 	pCEditWnd->SetWindowIcon( hIconSmall, ICON_SMALL );
 	pCEditWnd->SetWindowIcon( hIconBig, ICON_BIG );
 
-	//実行したコマンドラインを表示
+	// Grep出力のヘッダを作成
 	CNativeW cmemMessage;
 	cmemMessage.AllocStringBuffer( 4000 );
 	const STypeConfig& type = pcViewDst->m_pcEditDoc->m_cDocType.GetDocumentAttribute();
@@ -586,7 +581,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	pszWork = LS( STR_GREP_SUBFOLDER_YES );	//L"    (サブフォルダも検索)\r\n"
 	cmemMessage.AppendString( pszWork );
 
-	if( 0 < nWork ){ // 2003.06.10 Moca ファイル検索の場合は表示しない // 2004.09.26 条件誤り修正
+	if( 0 < nWork ){ // ファイル検索の場合は表示しない
 		if( sSearchOption.bWordOnly ){
 		/* 単語単位で探す */
 			cmemMessage.AppendString( LS( STR_GREP_COMPLETE_WORD ) );	//L"    (単語単位で探す)\r\n"
@@ -600,9 +595,11 @@ DWORD CGrepAgent::DoGrepRipgrep(
 		cmemMessage.AppendString( pszWork );
 
 		//正規表現ライブラリのバージョンも出力する
-		cmemMessage.AppendString( LS( STR_GREP_REGEX_DLL ) );	//L"    (正規表現:"
-		cmemMessage.AppendString( L"ripgrep" );
-		cmemMessage.AppendString( L")\r\n" );
+		if (sSearchOption.bRegularExp) {
+			cmemMessage.AppendString(LS(STR_GREP_REGEX_DLL));	//L"    (正規表現:"
+			cmemMessage.AppendString(L"ripgrep");
+			cmemMessage.AppendString(L")\r\n");
+		}
 	}
 
 	if( CODE_AUTODETECT == nGrepCharSet ){
@@ -617,23 +614,31 @@ DWORD CGrepAgent::DoGrepRipgrep(
 
 	cmemMessage.AppendString( L"\r\n\r\n" );
 	nWork = cmemMessage.GetStringLength();
+
 	// Grep開始時のカーソル位置を保持(Grep後にカーソル位置を戻すため)
-	CLayoutInt tmp_PosY_Layout = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+	CLayoutInt PosY_beforeGrep = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
 	if( 0 < nWork && bGrepHeader ){
 		AddTail( pcViewDst, cmemMessage, bGrepStdout );
 	}
 	cmemMessage._SetStringLength(0);
 	pszWork = NULL;
 
+	// 検索数算出のためのカーソル位置を保持(ヘッダ出力後のカーソル位置)
+	CLayoutInt PosY_afterHeadPrint = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+
 	const bool bDrawSwitchOld = pcViewDst->SetDrawSwitch(0 != GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView);
 
+	//実行結果の取り込み
 	typedef char PIPE_CHAR;
 	const int WORK_NULL_TERMS = sizeof(wchar_t); // 出力用\0の分
 	const int MAX_BUFIDX = 10; // bufidxの分
 	const DWORD MAX_WORK_READ = 1024 * 5; // 5KiB ReadFileで読み込む限界値
 	PIPE_CHAR work[MAX_WORK_READ + MAX_BUFIDX + WORK_NULL_TERMS];
 
-	//実行結果の取り込み
+	DWORD	new_cnt;
+	int		bufidx = 0;
+	bool	bLoopFlag = true;
+	bool	bCancelEnd = false; // キャンセルでプロセス停止
 	do {
 		switch (MsgWaitForMultipleObjects(1, &pi.hProcess, FALSE, 20, QS_ALLEVENTS)) {
 		case WAIT_OBJECT_0:
@@ -674,7 +679,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					break;
 				}
 
-				int		j;
+				int j;
 				int checklen = 0;
 				for (j = 0; j < (int)read_cnt;) {
 					ECharSet echarset;
@@ -691,7 +696,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 						j += checklen;
 					}
 				}
-				if (j == (int)read_cnt) {	//ぴったり出力できる場合
+				if (j == (int)read_cnt) { //ぴったり出力できる場合
 					work[read_cnt] = '\0';
 					CMemory input;
 					CNativeW buf;
@@ -705,7 +710,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					bufidx = 0;
 				}
 				else {
-					DEBUG_TRACE(L"read_cnt %d j %d\n", read_cnt, j);
 					char tmp[5];
 					int len = read_cnt - j;
 					memcpy(tmp, &work[j], len);
@@ -715,7 +719,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					cmemMessage._SetStringLength(0);
 					memcpy(work, tmp, len);
 					bufidx = len;
-					DEBUG_TRACE(L"ExecCmd: Carry last character [%x]\n", tmp[0]);
 				}
 
 				// 子プロセスの出力をどんどん受け取らないと子プロセスが
@@ -726,7 +729,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 				}
 				Sleep(0);
 
-				// 2010.04.12 Moca 相手が出力しつづけていると止められないから
+				// 相手が出力しつづけていると止められないから
 				// BlockingHookとキャンセル確認を読取ループ中でも行う
 				// bLoopFlag が立っていないときは、すでにプロセスは終了しているからTerminateしない
 				if (!::BlockingHook(cDlgCancel.GetHwnd())) {
@@ -736,7 +739,7 @@ DWORD CGrepAgent::DoGrepRipgrep(
 					goto finish;
 				}
 				if (cDlgCancel.IsCanceled()) {
-					//指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
+					// 指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
 					if (bLoopFlag) {
 						::TerminateProcess(pi.hProcess, 0);
 					}
@@ -748,15 +751,28 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	} while (bLoopFlag || new_cnt > 0);
 
 user_cancel:
+	// キャンセル表示(中断しました。)
 	if( bCancelEnd && bGrepHeader ){
-		const wchar_t* p = LS( STR_GREP_SUSPENDED );	//L"中断しました。\r\n"
+		const wchar_t* p = LS( STR_GREP_SUSPENDED );
 		CNativeW cmemSuspend;
 		cmemSuspend.SetString( p );
 		AddTail( pcViewDst, cmemSuspend, bGrepStdout );
 	}
 
 finish:
-	pcViewDst->GetCaret().MoveCursor( CLayoutPoint(CLayoutInt(0), tmp_PosY_Layout), true );	//	カーソルをGrep直前の位置に戻す。
+	// 結果出力(%d 個が検索されました。)
+	CLayoutInt PosY_afterGrep = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+	int nHitCount = PosY_afterGrep.GetValue() - PosY_afterHeadPrint.GetValue();
+	if( bGrepHeader ){
+		WCHAR szBuffer[128];
+		auto_sprintf( szBuffer, LS( STR_GREP_MATCH_COUNT ), nHitCount );
+		CNativeW cmemOutput;
+		cmemOutput.SetString( szBuffer );
+		AddTail( pcViewDst, cmemOutput, bGrepStdout );
+	}
+
+	// カーソルをGrep直前の位置に戻す
+	pcViewDst->GetCaret().MoveCursor( CLayoutPoint(CLayoutInt(0), PosY_beforeGrep), true );
 
 	cDlgCancel.CloseDialog( 0 );
 
