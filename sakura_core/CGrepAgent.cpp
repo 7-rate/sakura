@@ -25,6 +25,7 @@
 #include "sakura_rc.h"
 #include "env/CShareData.h"
 #include "util/tchar_template.h"
+#include "extmodule/CRipgrep.h"
 
 #define UICHECK_INTERVAL_MILLISEC 100	// UI確認の時間間隔
 #define ADDTAIL_INTERVAL_MILLISEC 50	// 結果出力の時間間隔
@@ -324,7 +325,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	bool					bGrepBackup
 )
 {
-#define RIPGREP_COMMAND L"rg.exe"
 	// 再入不可
 	if( this->m_bGrepRunning ){
 		assert_warning( false == this->m_bGrepRunning );

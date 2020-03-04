@@ -42,8 +42,14 @@ CRipgrep::~CRipgrep()
 }
 
 
-bool CanRipgrep()
+//rg.exeの存在チェック
+bool ExistRipgrep()
 {
-	//TODO rg.exeがあるかどうかを確認する
-	return true;
+	WCHAR cmdline[1024];
+	WCHAR szExeFolder[_MAX_PATH + 1];
+
+	GetExedir( cmdline, RIPGREP_COMMAND );
+	SplitPath_FolderAndFile( cmdline, szExeFolder, NULL );
+
+	return ( (DWORD)-1 != ::GetFileAttributes( cmdline ) );
 }

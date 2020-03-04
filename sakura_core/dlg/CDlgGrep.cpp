@@ -459,7 +459,14 @@ BOOL CDlgGrep::OnBnClicked( int wID )
 		}
 		break;
 	case IDC_CHK_USERIPGREP:
-		SetUseripgrep( 0 != ::IsDlgButtonChecked( GetHwnd(), IDC_CHK_USERIPGREP ) );
+		if (ExistRipgrep()) {
+			SetUseripgrep(0 != ::IsDlgButtonChecked(GetHwnd(), IDC_CHK_USERIPGREP));
+		}
+		else {
+			// rg.exeが存在していなければチェックできないようにする
+			::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, 0);
+			SetUseripgrep(false);
+		}
 		break;
 	case IDOK:
 		/* ダイアログデータの取得 */
@@ -612,8 +619,15 @@ void CDlgGrep::SetData( void )
 	::CheckDlgButton( GetHwnd(), IDC_CHK_DEFAULTFOLDER, m_pShareData->m_Common.m_sSearch.m_bGrepDefaultFolder );
 
 	//ripgrepが使えるか
-	::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_bUseRipgrep);
-	SetUseripgrep(m_bUseRipgrep);
+	if (ExistRipgrep()) {
+		::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, m_bUseRipgrep);
+		SetUseripgrep(m_bUseRipgrep);
+	}
+	else {
+		// rg.exeが存在していなければチェックできないようにする
+		::CheckDlgButton(GetHwnd(), IDC_CHK_USERIPGREP, 0);
+		SetUseripgrep(false);
+	}
 
 	return;
 }

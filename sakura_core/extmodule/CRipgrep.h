@@ -24,6 +24,8 @@
 */
 #pragma once
 
+#define RIPGREP_COMMAND L"rg.exe"
+
 class CRipgrep{
 public:
 	CRipgrep();
@@ -36,5 +38,5 @@ private:
 
 };
 
-bool CanRipgrep();
+bool ExistRipgrep();
 
