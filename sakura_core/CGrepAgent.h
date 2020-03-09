@@ -104,7 +104,7 @@ public:
 	);
 
 private:
-	std::wstring GetFirstFilePath( const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumOptions& cGrepEnumOptions );
+	std::wstring GetFirstFileRelativePath( const WCHAR* pszPath, CGrepEnumKeys& cGrepEnumKeys, CGrepEnumOptions& cGrepEnumOptions );
 
 	// Grep実行(ripgrep)
 	DWORD DoGrepRipgrep(

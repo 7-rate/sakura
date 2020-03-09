@@ -259,8 +259,8 @@ DWORD CGrepAgent::DoGrep(
 	return ret;
 }
 
-/* 指定したパスにある適当なファイルのフルパスを返す */
-std::wstring CGrepAgent::GetFirstFilePath(
+/* 指定したパスにある適当なファイルの相対パスを返す */
+std::wstring CGrepAgent::GetFirstFileRelativePath(
 	const WCHAR*			pszPath,
 	CGrepEnumKeys&			cGrepEnumKeys,
 	CGrepEnumOptions&		cGrepEnumOptions
@@ -289,7 +289,7 @@ std::wstring CGrepAgent::GetFirstFilePath(
 		std::wstring currentPath = pszPath;
 		currentPath += L"\\";
 		currentPath += folderName;
-		std::wstring fileName = GetFirstFilePath(currentPath.c_str(), cGrepEnumKeys, cGrepEnumOptions);
+		std::wstring fileName = GetFirstFileRelativePath(currentPath.c_str(), cGrepEnumKeys, cGrepEnumOptions);
 		if (!fileName.empty()) {
 			folderName += L"\\";
 			folderName += fileName;
@@ -365,154 +365,6 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	pcViewDst->m_pcEditWnd->m_cDlgGrep.m_bSetText = true;
 	pcViewDst->m_pcEditWnd->m_cDlgGrepReplace.m_strText = pcmGrepKey->GetStringPtr();
 	pcViewDst->m_pcEditWnd->m_cDlgGrepReplace.m_bSetText = true;
-
-	CDlgCancel cDlgCancel;
-	HWND hwndCancel = cDlgCancel.DoModeless( G_AppInstance(), pcViewDst->m_hwndParent, IDD_GREPRUNNING );
-	::SetDlgItemInt( hwndCancel, IDC_STATIC_HITCOUNT, 0, FALSE );
-	::DlgItem_SetText( hwndCancel, IDC_STATIC_CURFILE, L" " );
-	::CheckDlgButton( hwndCancel, IDC_CHECK_REALTIMEVIEW, GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView );
-
-	// rg.exeのパス取得
-	WCHAR cmdline[2048];
-	WCHAR szExeFolder[_MAX_PATH + 1];
-	GetExedir(cmdline, RIPGREP_COMMAND);
-	SplitPath_FolderAndFile(cmdline, szExeFolder, NULL);
-
-	// オプション設定
-	WCHAR options[1024] = { 0 };
-	wcscpy(options, L" --line-number --column");				//デフォルトオプション付加 行数出力
-	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i");		//大文字小文字区別
-	if (!sSearchOption.bRegularExp) wcscat(options, L" -F");	//正規表現使用
-	if (sSearchOption.bWordOnly) wcscat(options, L" -w");		//単語単位検索
-
-	// 検索対象のファイル拡張子設定
-	const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
-	CGrepEnumKeys cGrepEnumKeys;
-	int nErrorNo = cGrepEnumKeys.SetFileKeys(pcmGrepFile->GetStringPtr());
-	int nErrorNo_ExcludeFile = cGrepEnumKeys.AddExceptFile(pcmExcludeFile->GetStringPtr());
-	int nErrorNo_ExcludeFolder = cGrepEnumKeys.AddExceptFolder(pcmExcludeFolder->GetStringPtr());
-	if (nErrorNo != 0 || nErrorNo_ExcludeFile != 0 || nErrorNo_ExcludeFolder != 0) {
-		this->m_bGrepRunning = false;
-		pcViewDst->m_bDoing_UndoRedo = false;
-		pcViewDst->SetUndoBuffer();
-
-		const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
-		if (nErrorNo == 1) {
-			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
-		}
-		else if (nErrorNo == 2) {
-			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
-		}
-		else if (nErrorNo_ExcludeFile == 1) {
-			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
-		}
-		else if (nErrorNo_ExcludeFile == 2) {
-			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
-		}
-		else if (nErrorNo_ExcludeFolder == 1) {
-			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
-		}
-		else if (nErrorNo_ExcludeFolder == 2) {
-			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
-		}
-		ErrorMessage(pcViewDst->m_hwndParent, L"%s", pszErrorMessage);
-		return 0;
-	}
-	// 検索対象ファイル
-	for (auto key : cGrepEnumKeys.m_vecSearchFileKeys) {
-		wcscat(options, L" -g \"");
-		wcscat(options, key);
-		wcscat(options, L"\"");
-	}
-
-	// 検索除外ファイル
-	for (auto key : cGrepEnumKeys.m_vecExceptFileKeys) {
-		wcscat(options, L" -g \"!");
-		wcscat(options, key);
-		wcscat(options, L"\"");
-	}
-
-	// エンコーディング設定
-	if (IsValidCodeOrCPType(nGrepCharSet)) {
-		//エンコーディング指定
-		WCHAR szCpName[32];
-		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
-		wcscat(options, L" -E ");
-		wcscat(options, szCpName);
-	}
-	else {
-		// エンコーディング自動判別
-		CGrepEnumOptions cGrepEnumOptions;
-		std::wstring currentFile = pcmGrepFolder->GetStringPtr();
-		std::wstring lpFileName = GetFirstFilePath(currentFile.c_str(), cGrepEnumKeys, cGrepEnumOptions);
-		currentFile += L"\\";
-		currentFile += lpFileName;
-		const STypeConfigMini* type = NULL;
-		if (!CDocTypeManager().GetTypeConfigMini(CDocTypeManager().GetDocumentTypeOfPath(lpFileName.c_str()), &type)) {
-			return -1;
-		}
-		CCodeMediator cmediator(type->m_encoding);
-		ECodeType nCharCode = cmediator.CheckKanjiCodeOfFile(currentFile.c_str());;
-		const WCHAR* pszCodeName = L"";
-		if (IsValidCodeType(nCharCode)) {
-			pszCodeName = CCodeTypeName(nCharCode).Short();
-			wcscat(options, L" -E ");
-			wcscat(options, pszCodeName);
-		}
-	}
-
-	//コマンドライン文字列作成
-	WCHAR szCmdDir[_MAX_PATH];
-	::GetSystemDirectory(szCmdDir, _countof(szCmdDir));
-	auto_sprintf(cmdline, L"\"%s\\cmd.exe\" /D /C \"\"%s\\%s\" %s %s %s\"",
-		szCmdDir,
-		szExeFolder,		//sakura.exeパス
-		RIPGREP_COMMAND,	//rg.exe
-		options,			//rgオプション
-		pcmGrepKey->GetStringPtr(),
-		pcmGrepFolder->GetStringPtr()
-	);
-
-	HANDLE hStdOutWrite, hStdOutRead;
-	PROCESS_INFORMATION pi;
-	ZeroMemory(&pi, sizeof(pi));
-
-	//子プロセスの標準出力と接続するパイプを作成
-	SECURITY_ATTRIBUTES sa;
-	ZeroMemory(&sa, sizeof(sa));
-	sa.nLength = sizeof(sa);
-	sa.bInheritHandle = TRUE;
-	sa.lpSecurityDescriptor = NULL;
-	hStdOutRead = hStdOutWrite = 0;
-	if (CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 1000) == FALSE) {
-		return -1;
-	}
-
-	//CreateProcessに渡すSTARTUPINFOを作成
-	STARTUPINFO sui;
-	ZeroMemory(&sui, sizeof(sui));
-	sui.cb = sizeof(sui);
-	sui.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-	sui.wShowWindow = SW_HIDE;
-	sui.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-	sui.hStdOutput = hStdOutWrite;
-	sui.hStdError = hStdOutWrite;
-
-	//Grep開始
-	wcsncpy_s( CAppMode::getInstance()->m_szGrepKey, _countof(CAppMode::getInstance()->m_szGrepKey), pcmGrepKey->GetStringPtr(), _TRUNCATE );
-	this->m_bGrepMode = true;
-	BOOL bProcessResult = CreateProcess(
-		NULL,
-		cmdline,
-		NULL,
-		NULL,
-		TRUE,
-		CREATE_NEW_CONSOLE,
-		NULL,
-		pcmGrepFolder->GetStringPtr(),
-		&sui,
-		&pi
-	);
 
 	// CEditWndに新設した関数を使うように
 	HICON hIconBig, hIconSmall;
@@ -623,132 +475,294 @@ DWORD CGrepAgent::DoGrepRipgrep(
 	cmemMessage._SetStringLength(0);
 	pszWork = NULL;
 
-	// 検索数算出のためのカーソル位置を保持(ヘッダ出力後のカーソル位置)
-	CLayoutInt PosY_afterHeadPrint = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+	CDlgCancel cDlgCancel;
+	HWND hwndCancel = cDlgCancel.DoModeless(G_AppInstance(), pcViewDst->m_hwndParent, IDD_GREPRUNNING);
+	::SetDlgItemInt(hwndCancel, IDC_STATIC_HITCOUNT, 0, FALSE);
+	::DlgItem_SetText(hwndCancel, IDC_STATIC_CURFILE, L" ");
+	::CheckDlgButton(hwndCancel, IDC_CHECK_REALTIMEVIEW, GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView);
 
-	const bool bDrawSwitchOld = pcViewDst->SetDrawSwitch(0 != GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView);
+	// rg.exeのパス取得
+	WCHAR cmdline[2048];
+	WCHAR szExeFolder[_MAX_PATH + 1];
+	GetExedir(cmdline, RIPGREP_COMMAND);
+	SplitPath_FolderAndFile(cmdline, szExeFolder, NULL);
 
-	//実行結果の取り込み
-	typedef char PIPE_CHAR;
-	const int WORK_NULL_TERMS = sizeof(wchar_t); // 出力用\0の分
-	const int MAX_BUFIDX = 10; // bufidxの分
-	const DWORD MAX_WORK_READ = 1024 * 5; // 5KiB ReadFileで読み込む限界値
-	PIPE_CHAR work[MAX_WORK_READ + MAX_BUFIDX + WORK_NULL_TERMS];
+	// オプション設定
+	WCHAR options[1024] = { 0 };
+	wcscpy(options, L" --line-number --column");				//デフォルトオプション付加 行数出力
+	if (!sSearchOption.bLoHiCase) wcscat(options, L" -i");		//大文字小文字区別
+	if (!sSearchOption.bRegularExp) wcscat(options, L" -F");	//正規表現使用
+	if (sSearchOption.bWordOnly) wcscat(options, L" -w");		//単語単位検索
+
+	// 検索対象のファイル拡張子設定
+	const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
+	CGrepEnumKeys cGrepEnumKeys;
+	int nErrorNo = cGrepEnumKeys.SetFileKeys(pcmGrepFile->GetStringPtr());
+	int nErrorNo_ExcludeFile = cGrepEnumKeys.AddExceptFile(pcmExcludeFile->GetStringPtr());
+	int nErrorNo_ExcludeFolder = cGrepEnumKeys.AddExceptFolder(pcmExcludeFolder->GetStringPtr());
+	if (nErrorNo != 0 || nErrorNo_ExcludeFile != 0 || nErrorNo_ExcludeFolder != 0) {
+		this->m_bGrepRunning = false;
+		pcViewDst->m_bDoing_UndoRedo = false;
+		pcViewDst->SetUndoBuffer();
+
+		const WCHAR* pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS0);
+		if (nErrorNo == 1) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+		}
+		else if (nErrorNo == 2) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+		}
+		else if (nErrorNo_ExcludeFile == 1) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+		}
+		else if (nErrorNo_ExcludeFile == 2) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+		}
+		else if (nErrorNo_ExcludeFolder == 1) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS1);
+		}
+		else if (nErrorNo_ExcludeFolder == 2) {
+			pszErrorMessage = LS(STR_GREP_ERR_ENUMKEYS2);
+		}
+		ErrorMessage(pcViewDst->m_hwndParent, L"%s", pszErrorMessage);
+		return 0;
+	}
+	// 検索対象ファイル
+	for (auto key : cGrepEnumKeys.m_vecSearchFileKeys) {
+		wcscat(options, L" -g \"");
+		wcscat(options, key);
+		wcscat(options, L"\"");
+	}
+
+	// 検索除外ファイル
+	for (auto key : cGrepEnumKeys.m_vecExceptFileKeys) {
+		wcscat(options, L" -g \"!");
+		wcscat(options, key);
+		wcscat(options, L"\"");
+	}
+
+	// エンコーディング設定
+	if (IsValidCodeOrCPType(nGrepCharSet)) {
+		//エンコーディング指定
+		WCHAR szCpName[32];
+		CCodePage::GetNameNormal(szCpName, nGrepCharSet);
+		wcscat(options, L" -E ");
+		wcscat(options, szCpName);
+	}
+	else {
+		// エンコーディング自動判別
+		CGrepEnumOptions cGrepEnumOptions;
+		std::wstring currentFile = pcmGrepFolder->GetStringPtr();
+		std::wstring lpFileName = GetFirstFileRelativePath(currentFile.c_str(), cGrepEnumKeys, cGrepEnumOptions);
+		currentFile += L"\\";
+		currentFile += lpFileName;
+		const STypeConfigMini* type = NULL;
+		if (!CDocTypeManager().GetTypeConfigMini(CDocTypeManager().GetDocumentTypeOfPath(lpFileName.c_str()), &type)) {
+			return -1;
+		}
+		CCodeMediator cmediator(type->m_encoding);
+		ECodeType nCharCode = cmediator.CheckKanjiCodeOfFile(currentFile.c_str());;
+		const WCHAR* pszCodeName = L"";
+		if (IsValidCodeType(nCharCode)) {
+			pszCodeName = CCodeTypeName(nCharCode).Short();
+			wcscat(options, L" -E ");
+			wcscat(options, pszCodeName);
+		}
+	}
 
 	DWORD	new_cnt;
 	int		bufidx = 0;
 	bool	bLoopFlag = true;
 	bool	bCancelEnd = false; // キャンセルでプロセス停止
-	do {
-		switch (MsgWaitForMultipleObjects(1, &pi.hProcess, FALSE, 20, QS_ALLEVENTS)) {
-		case WAIT_OBJECT_0:
-			//終了していればループフラグをfalseとする
-			//ただしループの終了条件は プロセス終了 && パイプが空
-			bLoopFlag = false;
-			break;
-		case WAIT_OBJECT_0 + 1:
-			//処理中のユーザー操作を可能にする
-			if (!::BlockingHook(cDlgCancel.GetHwnd())) {
-				// WM_QUIT受信。ただちに終了処理
-				::TerminateProcess(pi.hProcess, 0);
-				goto finish;
-			}
-			break;
-		default:
-			break;
+	const bool bDrawSwitchOld = pcViewDst->SetDrawSwitch(0 != GetDllShareData().m_Common.m_sSearch.m_bGrepRealTimeView);
+
+	// 検索数算出のためのカーソル位置を保持(ヘッダ出力後のカーソル位置)
+	CLayoutInt PosY_afterHeadPrint = pcViewDst->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+
+	HANDLE hStdOutWrite = 0;
+	HANDLE hStdOutRead = 0;
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&pi, sizeof(pi));
+	SECURITY_ATTRIBUTES sa;
+	STARTUPINFO sui;
+
+	for (int nPath = 0; nPath < (int)vPaths.size(); nPath++) {
+		//子プロセスの標準出力と接続するパイプを作成
+		ZeroMemory(&sa, sizeof(sa));
+		sa.nLength = sizeof(sa);
+		sa.bInheritHandle = TRUE;
+		sa.lpSecurityDescriptor = NULL;
+		if (CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 1000) == FALSE) {
+			return -1;
 		}
-		//中断ボタン押下チェック
-		if (cDlgCancel.IsCanceled()) {
-			//指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
-			::TerminateProcess(pi.hProcess, 0);
-			bCancelEnd = true;
-			break;
-		}
-		new_cnt = 0;
 
-		if (PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {	//パイプの中の読み出し待機中の文字数を取得
-			while (new_cnt > 0) {
-				if (new_cnt > MAX_WORK_READ) {	//パイプから読み出す量を調整
-					new_cnt = MAX_WORK_READ;
-				}
-				DWORD	read_cnt = 0;
-				::ReadFile(hStdOutRead, &work[bufidx], new_cnt, &read_cnt, NULL);	//パイプから読み出し
-				read_cnt += bufidx;													//work内の実際のサイズにする
+		//CreateProcessに渡すSTARTUPINFOを作成
+		ZeroMemory(&sui, sizeof(sui));
+		sui.cb = sizeof(sui);
+		sui.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+		sui.wShowWindow = SW_HIDE;
+		sui.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+		sui.hStdOutput = hStdOutWrite;
+		sui.hStdError = hStdOutWrite;
 
-				if (read_cnt == 0) {
-					break;
-				}
+		//コマンドライン文字列作成
+		std::wstring sPath = ChopYen(vPaths[nPath]);
+		WCHAR szCmdDir[_MAX_PATH];
+		::GetSystemDirectory(szCmdDir, _countof(szCmdDir));
+		auto_sprintf(cmdline, L"\"%s\\cmd.exe\" /D /C \"\"%s\\%s\" %s %s %s\"",
+			szCmdDir,
+			szExeFolder,		//sakura.exeパス
+			RIPGREP_COMMAND,	//rg.exe
+			options,			//rgオプション
+			pcmGrepKey->GetStringPtr(),
+			sPath.c_str()
+		);
 
-				int j;
-				int checklen = 0;
-				for (j = 0; j < (int)read_cnt;) {
-					ECharSet echarset;
-					checklen = CheckUtf8Char2(work + j, read_cnt - j, &echarset, true, 0);
-					if (echarset == CHARSET_BINARY2) {
-						break;
-					}
-					else if (read_cnt - 1 == j && work[j] == _T2(PIPE_CHAR, '\r')) {
-						// CRLFの一部ではない改行が末尾にある
-						// 次の読み込みで、CRLFの一部になる可能性がある
-						break;
-					}
-					else {
-						j += checklen;
-					}
-				}
-				if (j == (int)read_cnt) { //ぴったり出力できる場合
-					work[read_cnt] = '\0';
-					CMemory input;
-					CNativeW buf;
-					input.SetRawData(work, read_cnt);
-					CCodeBase* pcCodeBase = CCodeFactory::CreateCodeBase(CODE_UTF8, 0);
-					pcCodeBase->CodeToUnicode(input, &buf);
+		AddTail(pcViewDst, cmdline, bGrepStdout);
+		AddTail(pcViewDst, L"\r\n", bGrepStdout);
 
-					cmemMessage.AppendString(buf.GetStringPtr(), buf.GetStringLength());
-					AddTail( pcViewDst, cmemMessage, bGrepStdout );
-					cmemMessage._SetStringLength(0);
-					bufidx = 0;
-				}
-				else {
-					char tmp[5];
-					int len = read_cnt - j;
-					memcpy(tmp, &work[j], len);
-					work[j] = '\0';
-					cmemMessage.AppendString((wchar_t*)work, j);
-					AddTail( pcViewDst, cmemMessage, bGrepStdout );
-					cmemMessage._SetStringLength(0);
-					memcpy(work, tmp, len);
-					bufidx = len;
-				}
+		//Grep開始
+		wcsncpy_s(CAppMode::getInstance()->m_szGrepKey, _countof(CAppMode::getInstance()->m_szGrepKey), pcmGrepKey->GetStringPtr(), _TRUNCATE);
+		this->m_bGrepMode = true;
+		BOOL bProcessResult = CreateProcess(
+			NULL,
+			cmdline,
+			NULL,
+			NULL,
+			TRUE,
+			CREATE_NEW_CONSOLE,
+			NULL,
+			sPath.c_str(),
+			&sui,
+			&pi
+		);
 
-				// 子プロセスの出力をどんどん受け取らないと子プロセスが
-				// 停止してしまうため，バッファが空になるまでどんどん読み出す．
-				new_cnt = 0;
-				if (!PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {
-					break;
-				}
-				Sleep(0);
+		//実行結果の取り込み
+		typedef char PIPE_CHAR;
+		const int WORK_NULL_TERMS = sizeof(wchar_t); // 出力用\0の分
+		const int MAX_BUFIDX = 10; // bufidxの分
+		const DWORD MAX_WORK_READ = 1024 * 5; // 5KiB ReadFileで読み込む限界値
+		PIPE_CHAR work[MAX_WORK_READ + MAX_BUFIDX + WORK_NULL_TERMS];
 
-				// 相手が出力しつづけていると止められないから
-				// BlockingHookとキャンセル確認を読取ループ中でも行う
-				// bLoopFlag が立っていないときは、すでにプロセスは終了しているからTerminateしない
+		do {
+			switch (MsgWaitForMultipleObjects(1, &pi.hProcess, FALSE, 20, QS_ALLEVENTS)) {
+			case WAIT_OBJECT_0:
+				//終了していればループフラグをfalseとする
+				//ただしループの終了条件は プロセス終了 && パイプが空
+				bLoopFlag = false;
+				break;
+			case WAIT_OBJECT_0 + 1:
+				//処理中のユーザー操作を可能にする
 				if (!::BlockingHook(cDlgCancel.GetHwnd())) {
-					if (bLoopFlag) {
-						::TerminateProcess(pi.hProcess, 0);
-					}
+					// WM_QUIT受信。ただちに終了処理
+					::TerminateProcess(pi.hProcess, 0);
 					goto finish;
 				}
-				if (cDlgCancel.IsCanceled()) {
-					// 指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
-					if (bLoopFlag) {
-						::TerminateProcess(pi.hProcess, 0);
+				break;
+			default:
+				break;
+			}
+			//中断ボタン押下チェック
+			if (cDlgCancel.IsCanceled()) {
+				//指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
+				::TerminateProcess(pi.hProcess, 0);
+				bCancelEnd = true;
+				break;
+			}
+			new_cnt = 0;
+
+			if (PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {	//パイプの中の読み出し待機中の文字数を取得
+				while (new_cnt > 0) {
+					if (new_cnt > MAX_WORK_READ) {	//パイプから読み出す量を調整
+						new_cnt = MAX_WORK_READ;
 					}
-					bCancelEnd = true;
-					goto user_cancel;
+					DWORD	read_cnt = 0;
+					::ReadFile(hStdOutRead, &work[bufidx], new_cnt, &read_cnt, NULL);	//パイプから読み出し
+					read_cnt += bufidx;													//work内の実際のサイズにする
+
+					if (read_cnt == 0) {
+						break;
+					}
+
+					int j;
+					int checklen = 0;
+					for (j = 0; j < (int)read_cnt;) {
+						ECharSet echarset;
+						checklen = CheckUtf8Char2(work + j, read_cnt - j, &echarset, true, 0);
+						if (echarset == CHARSET_BINARY2) {
+							break;
+						}
+						else if (read_cnt - 1 == j && work[j] == _T2(PIPE_CHAR, '\r')) {
+							// CRLFの一部ではない改行が末尾にある
+							// 次の読み込みで、CRLFの一部になる可能性がある
+							break;
+						}
+						else {
+							j += checklen;
+						}
+					}
+					if (j == (int)read_cnt) { //ぴったり出力できる場合
+						work[read_cnt] = '\0';
+						CMemory input;
+						CNativeW buf;
+						input.SetRawData(work, read_cnt);
+						CCodeBase* pcCodeBase = CCodeFactory::CreateCodeBase(CODE_UTF8, 0);
+						pcCodeBase->CodeToUnicode(input, &buf);
+
+						cmemMessage.AppendString(buf.GetStringPtr(), buf.GetStringLength());
+						AddTail( pcViewDst, cmemMessage, bGrepStdout );
+						cmemMessage._SetStringLength(0);
+						bufidx = 0;
+					}
+					else {
+						char tmp[5];
+						int len = read_cnt - j;
+						memcpy(tmp, &work[j], len);
+						work[j] = '\0';
+						cmemMessage.AppendString((wchar_t*)work, j);
+						AddTail( pcViewDst, cmemMessage, bGrepStdout );
+						cmemMessage._SetStringLength(0);
+						memcpy(work, tmp, len);
+						bufidx = len;
+					}
+
+					// 子プロセスの出力をどんどん受け取らないと子プロセスが
+					// 停止してしまうため，バッファが空になるまでどんどん読み出す．
+					new_cnt = 0;
+					if (!PeekNamedPipe(hStdOutRead, NULL, 0, NULL, &new_cnt, NULL)) {
+						break;
+					}
+					Sleep(0);
+
+					// 相手が出力しつづけていると止められないから
+					// BlockingHookとキャンセル確認を読取ループ中でも行う
+					// bLoopFlag が立っていないときは、すでにプロセスは終了しているからTerminateしない
+					if (!::BlockingHook(cDlgCancel.GetHwnd())) {
+						if (bLoopFlag) {
+							::TerminateProcess(pi.hProcess, 0);
+						}
+						goto finish;
+					}
+					if (cDlgCancel.IsCanceled()) {
+						// 指定されたプロセスと、そのプロセスが持つすべてのスレッドを終了させます。
+						if (bLoopFlag) {
+							::TerminateProcess(pi.hProcess, 0);
+						}
+						bCancelEnd = true;
+						goto user_cancel;
+					}
 				}
 			}
-		}
-	} while (bLoopFlag || new_cnt > 0);
+		} while (bLoopFlag || new_cnt > 0);
+
+		if (hStdOutWrite) CloseHandle(hStdOutWrite);
+		if (hStdOutRead) CloseHandle(hStdOutRead);
+		if (pi.hProcess) CloseHandle(pi.hProcess);
+		if (pi.hThread) CloseHandle(pi.hThread);
+		hStdOutWrite = 0;
+		hStdOutRead = 0;
+		ZeroMemory(&pi, sizeof(pi));
+	}
 
 user_cancel:
 	// キャンセル表示(中断しました。)
@@ -793,7 +807,7 @@ finish:
 		pCEditWnd->RedrawAllViews( NULL );
 
 	if (hStdOutWrite) CloseHandle(hStdOutWrite);
-	CloseHandle(hStdOutRead);
+	if (hStdOutRead) CloseHandle(hStdOutRead);
 	if (pi.hProcess) CloseHandle(pi.hProcess);
 	if (pi.hThread) CloseHandle(pi.hThread);
 
