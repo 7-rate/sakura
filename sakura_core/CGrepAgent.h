@@ -85,8 +85,6 @@ public:
 		const CNativeW*			pcmGrepReplace,
 		const CNativeW*			pcmGrepFile,
 		const CNativeW*			pcmGrepFolder,
-		const CNativeW*			pcmExcludeFile,
-		const CNativeW*			pcmExcludeFolder,
 		bool					bGrepCurFolder,
 		BOOL					bGrepSubFolder,
 		bool					bGrepStdout,
