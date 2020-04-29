@@ -439,6 +439,7 @@ void CEditView::ISearchExec(bool bNext)
 		m_sISearchHistory[m_nISearchHistoryCount] = sMatchRange;
 	}
 
+	SB_Marker_CallPaint(500);
 	m_bCurSrchKeyMark = true;
 
 	Redraw();	

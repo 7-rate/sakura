@@ -79,6 +79,10 @@ void CViewCommander::Command_SEARCH_NEXT(
 	CLogicRange*	pcSelectLogic		//!< [out] 選択範囲のロジック版。マッチ範囲を返す。すべて置換/高速モードで使用
 )
 {
+	bool bSBClear = false;
+	if (!m_pCommanderView->m_bCurSrchKeyMark) {
+		bSBClear = true;
+	}
 	bool		bSelecting;
 	bool		bFlag1 = false;
 	bool		bSelectingLock_Old = false;
@@ -318,11 +322,18 @@ end_of_func:;
 			AlertNotFound(hwndParent, bReplaceAll, L"%ls", pszNotFoundMessage);
 		}
 	}
+	if (bSBClear) {
+		m_pCommanderView->SB_Marker_Clear(801);
+	}
 }
 
 /* 前を検索 */
 void CViewCommander::Command_SEARCH_PREV( bool bReDraw, HWND hwndParent )
 {
+	bool bSBClear = false;
+	if (!m_pCommanderView->m_bCurSrchKeyMark) {
+		bSBClear = true;
+	}
 	bool		bSelecting;
 	bool		bSelectingLock_Old = false;
 	bool		bFound = false;
@@ -471,6 +482,10 @@ end_of_func:;
 			KeyName.GetStringPtr()
 		);
 	}
+	if (bSBClear) {
+		m_pCommanderView->SB_Marker_Clear(802);
+	}
+
 	return;
 }
 
@@ -1529,6 +1544,8 @@ void CViewCommander::Command_SEARCH_CLEARMARK( void )
 
 		// 再描画
 		m_pCommanderView->RedrawAll();
+		m_pCommanderView->SB_Marker_Clear(301);
+
 		return;
 	}
 // To Here 2001.12.03 hor
@@ -1538,6 +1555,8 @@ void CViewCommander::Command_SEARCH_CLEARMARK( void )
 	m_pCommanderView->m_bCurSrchKeyMark = false;	/* 検索文字列のマーク */
 	/* フォーカス移動時の再描画 */
 	m_pCommanderView->RedrawAll();
+	m_pCommanderView->SB_Marker_Clear(302);
+
 	return;
 }
 

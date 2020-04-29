@@ -4374,9 +4374,14 @@ void CEditWnd::Views_Redraw()
 		if( m_nActivePaneIndex != v )
 			GetView(v).Redraw();
 	}
+	for (int v = 0; v < GetAllViewCount(); ++v) {
+		if (m_nActivePaneIndex != v)
+			GetView(v).AdjustScrollBars();
+	}
 	GetMiniMap().Redraw();
 	//アクティブを再描画
 	GetActiveView().Redraw();
+	GetActiveView().AdjustScrollBars();
 }
 
 /* アクティブなペインを設定 */

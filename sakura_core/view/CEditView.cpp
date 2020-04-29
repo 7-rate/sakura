@@ -59,6 +59,26 @@
 #include "util/os.h" //WM_MOUSEWHEEL,IMR_RECONVERTSTRING,WM_XBUTTON*,IMR_CONFIRMRECONVERTSTRING
 #include "util/module.h"
 #include "debug/CRunningTimer.h"
+#include <process.h>
+#include "_main/CAppMode.h"
+#include "CEditApp.h"
+#include "CGrepAgent.h" // use CEditApp.h
+
+
+#define WM_APP_SCRBAR_PAINT    (WM_APP + 2501)  // スクロールバー描画メッセージ
+#define WM_APP_SCRBAR_ENDPAINT (WM_APP + 2502)  // スクロールバー描画終了メッセージ
+#define NK_SCRBAR_FOUND_MAGIC (0x10000000)  // 検索
+#define NK_SCRBAR_MARK_MAGIC  (0x20000000)  // ブックマーク
+#define NK_SCRBAR_LINEN_MASK  (0x0fffffff)  // 行番号マスク
+#define NK_SCRBAR_MAGIC_MASK  (0xf0000000)  // マジックマスク
+// 検索文字列のある行の色 (REG/EditViewScrBarFoundColor:#0000d7)
+#define NK_SCRBAR_FOUND_COLOR  _T("#f4a721") //_T("#32CD32") //_T("#0000d7")
+// ブックマークのある行の色 (REG/EditViewScrBarMarkColor:#d80000)
+#define NK_SCRBAR_MARK_COLOR   _T("#ff0032") //_T("#ff0000") //_T("#d80000")
+// キャレットのある行の色 (REG/EditViewScrBarMarkColor:#d80000)
+#define NK_SCRBAR_CURSOR_COLOR _T("#0026ff") //_T("#0000cd") //_T("#00d800")
+
+#define NK_EDITVIEW_H_SCRBAR_REDRAW_TIMING  (1)  // 水平スクロールバーの更新タイミングを修正
 
 LRESULT CALLBACK EditViewWndProc( HWND, UINT, WPARAM, LPARAM );
 VOID CALLBACK EditViewTimerProc( HWND, UINT, UINT_PTR, DWORD );
@@ -149,6 +169,7 @@ CEditView::CEditView(CEditWnd* pcEditWnd)
 , m_nAutoScrollMode(0)
 , m_cHistory(NULL)
 , m_cRegexKeyword(NULL)
+, SBMarker_(new ScrBarMarker(this))
 {
 }
 
@@ -887,6 +908,36 @@ LRESULT CEditView::DispatchEvent(
 		}
 		return 0L; // not use.
 	}
+	case WM_APP_SCRBAR_PAINT: // スクロールバー描画
+	{
+		SB_Marker_Trace(L"WM_APP_SCRBAR_PAINT, RequestCount %d", SBMarker_->nDrawRequestCount_);
+		SBMarker_->WaitForBuild(false);
+
+		// 再描画したいタイミングが複数あり, メッセージがたくさん飛んでくるので
+		// リクエストカウンタが残り１のときに描画処理をする
+		if (SBMarker_->nDrawRequestCount_ == 1) {
+			// 構築時のキーと違っていたら再構築から
+			if (m_sSearchPattern.GetKey() && SBMarker_->strKey_ != m_sSearchPattern.GetKey()) {
+				SB_Marker_Trace(L"    !!! strKey != m_sSearchPattern.GetKey()");
+				SB_Marker_Clear(4000);
+				return 0L;
+			}
+
+			SB_Marker_Draw();
+		}
+
+		SBMarker_->nDrawRequestCount_ = std::max(SBMarker_->nDrawRequestCount_ - 1, 0);
+	}
+	return 0L;
+
+	case WM_APP_SCRBAR_ENDPAINT: // スクロールバー描画終了
+	{
+		SB_Marker_Trace(L"WM_APP_SCRBAR_ENDPAINT");
+		SBMarker_->WaitForDraw(false);
+
+		::UpdateWindow(m_hwndVScrollBar);
+	}
+	return 0L;
 
 	default:
 		return DefWindowProc( hwnd, uMsg, wParam, lParam );
@@ -1020,6 +1071,8 @@ void CEditView::OnSize( int cx, int cy )
 			MiniMapRedraw(true);
 		}
 	}
+
+	SB_Marker_CallPaint(1901);
 	return;
 }
 
@@ -1060,6 +1113,7 @@ void CEditView::OnSetFocus( void )
 			MiniMapRedraw(true);
 		}
 	}
+	SB_Marker_CallPaint(1900);
 }
 
 /* 入力フォーカスを失ったときの処理 */
@@ -2752,4 +2806,591 @@ void CEditView::SetUndoBuffer(bool bPaintLineNumber)
 		}
 		m_cCommander.SetOpeBlk(NULL);
 	}
+}
+
+//----------------------
+// キャッシュ作成
+//----------------------
+unsigned __stdcall SB_Marker_BuildThread(void *arg)
+{
+	CEditView *pEditView = (CEditView *)arg;
+
+	// 構築時のキーを記録
+	if (pEditView->m_sSearchPattern.GetKey()) {
+		pEditView->SBMarker_->strKey_ = pEditView->m_sSearchPattern.GetKey();
+	}
+	else {
+		pEditView->SBMarker_->strKey_ = _T("");
+	}
+
+	// リセット
+	pEditView->SBMarker_->nSearchFoundLine_ = 0;
+	pEditView->SBMarker_->nMarkFoundLine_ = 0;
+	pEditView->SBMarker_->nDrawRequestCount_ = 0;
+
+	// ラインの配列を作成
+	const CLayoutInt nAllLines = pEditView->m_pcEditDoc->m_cLayoutMgr.GetLineCount();
+	std::vector<const CDocLine *> vLines;
+	vLines.reserve(nAllLines + 1);
+
+	// 要素を詰め込む
+	{
+		const CDocLine *pCDocLine = pEditView->m_pcEditDoc->m_cDocLineMgr.GetDocLineTop();
+		while (pCDocLine) {
+			vLines.push_back(pCDocLine);
+			pCDocLine = pCDocLine->GetNextLine();
+		}
+	}
+
+	// キャッシュ用
+	std::vector<uint32_t> vCache(nAllLines + 1, 0u);
+
+	CEditView::ScrBarMarker &rSBMarker = *pEditView->SBMarker_;
+
+	CLayoutInt nLineHint = CLogicInt(0);
+	bool bNoTextWrap = (pEditView->m_pcEditDoc->m_nTextWrapMethodCur == WRAP_NO_TEXT_WRAP);
+
+	const int vsize = (int)vLines.size();
+
+	for (int i = 0; i < vsize; i++) {
+		const CDocLine *pCDocLine = vLines[i];
+
+		uint32_t uFoundMagic = rSBMarker.IsFoundLine(pCDocLine) ? NK_SCRBAR_FOUND_MAGIC : 0u;
+		uint32_t uMarkMagic = CBookmarkGetter(pCDocLine).IsBookmarked() ? NK_SCRBAR_MARK_MAGIC : 0u;
+
+		if ((uFoundMagic | uMarkMagic) != 0u) {
+			CLogicInt nLogicY = i;
+			CLayoutInt nLayoutY;
+
+			if (bNoTextWrap) {  // 折り返しなし
+				// ロジック行＝レイアウト行
+				nLayoutY = nLogicY;
+			}
+			else {
+				// ロジック行→レイアウト行
+				CLayoutPoint ptLayout;
+				pEditView->m_pcEditDoc->m_cLayoutMgr.LogicToLayout(/*CLogicPoint*/{ 0, nLogicY }, &ptLayout,
+					nLineHint);
+				nLayoutY = ptLayout.y;
+			}
+
+			// キャッシュに登録
+			vCache[i] = (uint32_t)nLayoutY | (uFoundMagic | uMarkMagic);
+			if (uFoundMagic != 0u) rSBMarker.nSearchFoundLine_++;
+			if (uMarkMagic != 0u) rSBMarker.nMarkFoundLine_++;
+			//rSBMarker.Add(nLayoutY, uFoundMagic);  // 検索文字列のある行
+			//rSBMarker.Add(nLayoutY, uMarkMagic);   // ブックマーク
+
+			nLineHint = nLayoutY;
+		}
+		else {
+			nLineHint++;
+		}
+
+		if (rSBMarker.bExitRequestBuildThread_) {  // 中断
+			SB_Marker_Trace(L"  >>>> abort CacheBuildThread");
+			goto end_thread;
+		}
+	}
+
+	// キャッシュと入れ替え
+	rSBMarker.vLines_.swap(vCache);
+
+end_thread:
+	if (!rSBMarker.bExitRequestBuildThread_) {
+		pEditView->SB_Marker_DrawRequest();  // 描画要求
+	}
+	rSBMarker.bExitRequestBuildThread_ = false;
+	rSBMarker.bBuildThreadRunning_ = false;
+	SB_Marker_Trace(L"  >>> finish SB_Marker_BuildThread %d", rSBMarker.vLines_.size());
+	_endthreadex(0);
+	return 0;
+}
+
+//----------------------
+// キャッシュ描画
+//----------------------
+unsigned __stdcall SB_Marker_DrawThread(void *arg)
+{
+	CEditView *pEditView = (CEditView *)arg;
+
+	/* 垂直スクロールバー */
+	const CLayoutInt	nEofMargin = CLayoutInt(1); // EOFのマージン
+	const CLayoutInt	nAllLines = pEditView->m_pcEditDoc->m_cLayoutMgr.GetLineCount() + nEofMargin;
+	bool bEnable = (pEditView->GetTextArea().m_nViewRowNum < nAllLines);
+
+	int nCxVScroll = ::GetSystemMetrics(SM_CXVSCROLL) - DpiScaleX(1);
+	int nCyVScroll = ::GetSystemMetrics(SM_CYVSCROLL);
+
+	CEditView::ScrBarMarker &rSBMarker = *pEditView->SBMarker_;
+
+	int nThumbTop = rSBMarker.sbi_.xyThumbTop;
+	int nThumbBottom = rSBMarker.sbi_.xyThumbBottom;
+	int nBarTop = nCyVScroll/*rSBMarker.sbi_.dxyLineButton*/;
+	int nBarHeight = rSBMarker.sbi_.rcScrollBar.bottom - rSBMarker.sbi_.rcScrollBar.top -
+		(nCyVScroll /*rSBMarker.sbi_.dxyLineButton*/ * 2);
+
+	//COLORREF clrSearch = si::ColorString::ToCOLORREF(RegKey(NK_REGKEY).get_s(_T("EditViewScrBarFoundColor"), NK_SCRBAR_FOUND_COLOR));
+	//COLORREF clrMark = si::ColorString::ToCOLORREF(RegKey(NK_REGKEY).get_s(_T("EditViewScrBarMarkColor"), NK_SCRBAR_MARK_COLOR));
+	//COLORREF clrCursor = si::ColorString::ToCOLORREF(RegKey(NK_REGKEY).get_s(_T("EditViewScrBarCursorColor"), NK_SCRBAR_CURSOR_COLOR));
+
+	COLORREF clrSearch = (COLORREF)NK_SCRBAR_FOUND_COLOR;
+	COLORREF clrMark = (COLORREF)NK_SCRBAR_MARK_COLOR;
+	COLORREF clrCursor = (COLORREF)NK_SCRBAR_CURSOR_COLOR;
+
+
+start_thread:
+	enum {
+		eLoopBreak_None = 0,
+		eLoopBreak_Restart,
+		eLoopBreak_Abort,
+	};
+	int loop_break = eLoopBreak_None;
+
+	// キャッシュを使用して描画
+	{
+		const int foundLeft = std::max(0, 0);
+		const int foundWidth = std::max(DpiScaleX(1), nCxVScroll - DpiScaleX(1));
+		const int foundHeight = std::max(DpiScaleY(1), DpiScaleY(2));
+
+		const int markLeft = std::max(DpiScaleX(0), nCxVScroll / 3 * 0);
+		const int markWidth = std::max(DpiScaleX(1), nCxVScroll / 3 * 1);
+		const int markHeight = std::max(DpiScaleY(1), nCxVScroll / 3 * 1);
+
+		const int vsize = (int)rSBMarker.vLines_.size();
+
+#ifdef _OPENMP
+#pragma omp parallel num_threads(2)
+#endif
+		{
+			HDC hdc = ::GetDC(pEditView->m_hwndVScrollBar);
+			CGraphics gr(hdc);
+
+			// 描画関数
+			auto fnDrawMark = [=, &gr](uint32_t ln, int left, int width, int height, COLORREF clr) {
+				int x = 1;
+				int y = nBarTop;
+
+				y += bEnable ? ((int)((float)(ln & NK_SCRBAR_LINEN_MASK) / nAllLines * nBarHeight))
+					: ((int)((float)(ln & NK_SCRBAR_LINEN_MASK) / pEditView->GetTextArea().m_nViewRowNum *
+						nBarHeight));
+
+				int margin = 0;  // スクロールバーの領域を超えた時のマージン
+				int x2 = x + left;
+				int y2 = y - height / 2;  // 中央にくるように
+				// スクロールボックスに被らないように補正
+				if (y2 < nBarTop) {
+					margin = nBarTop - y2;
+				}
+				else if (y2 + height > nBarTop + nBarHeight) {
+					margin = (nBarTop + nBarHeight) - (y2 + height);
+				}
+				gr.FillSolidMyRect(/*RECT*/{ x2, y2 + margin, x2 + width, y2 + height + margin }, clr);
+			};
+
+#ifdef _OPENMP
+#pragma omp for
+#endif
+			for (int i = 0; i < vsize; i++) {
+				if (loop_break != eLoopBreak_None) break;
+
+				uint32_t ln = rSBMarker.vLines_[i];
+
+				// 検索行
+				if (ln & NK_SCRBAR_FOUND_MAGIC) {
+					fnDrawMark(ln, foundLeft, foundWidth, foundHeight, clrSearch);
+				}
+
+				if (rSBMarker.bRestartRequestDrawThread_) {  // やり直し
+					loop_break = eLoopBreak_Restart;
+				}
+				if (rSBMarker.bExitRequestDrawThread_) {  // 中断
+					loop_break = eLoopBreak_Abort;
+				}
+			}
+
+#ifdef _OPENMP
+#pragma omp for
+#endif
+			for (int i = 0; i < vsize; i++) {
+				if (loop_break != eLoopBreak_None) break;
+
+				uint32_t ln = rSBMarker.vLines_[i];
+
+				// ブックマーク行
+				if (ln & NK_SCRBAR_MARK_MAGIC) {
+					fnDrawMark(ln, markLeft, markWidth, markHeight, clrMark);
+				}
+
+				if (rSBMarker.bRestartRequestDrawThread_) {  // やり直し
+					loop_break = eLoopBreak_Restart;
+				}
+				if (rSBMarker.bExitRequestDrawThread_) {  // 中断
+					loop_break = eLoopBreak_Abort;
+				}
+			}
+
+			::ReleaseDC(pEditView->m_hwndVScrollBar, hdc);
+		}
+	}
+
+	// カーソル行
+	{
+		HDC hdc = ::GetDC(pEditView->m_hwndVScrollBar);
+		CGraphics gr(hdc);
+
+		int x = 1;
+		int y = nBarTop;
+
+		y += bEnable ? ((int)((float)(pEditView->GetCaret().GetCaretLayoutPos().GetY2()) / nAllLines *
+			nBarHeight))
+			: ((int)((float)(pEditView->GetCaret().GetCaretLayoutPos().GetY2()) /
+				pEditView->GetTextArea().m_nViewRowNum * nBarHeight));
+
+		//gr.FillSolidMyRect(/*RECT*/{x, nBarTop, x + nCxVScroll - 1, nBarTop + nBarHeight}, ::GetSysColor(COLOR_MENU));
+		//gr.FillSolidMyRect(/*RECT*/{x, nThumbTop, x + nCxVScroll - 1, nThumbBottom}, ::GetSysColor(COLOR_SCROLLBAR));
+
+		const int w = std::max(DpiScaleX(1), nCxVScroll - DpiScaleX(1));
+		const int h = std::max(DpiScaleY(1), DpiScaleY(2));
+		gr.FillSolidMyRect(/*RECT*/{ x, y, x + w, y + h }, clrCursor);
+
+		::ReleaseDC(pEditView->m_hwndVScrollBar, hdc);
+	}
+
+	if (loop_break == eLoopBreak_Abort) {
+		rSBMarker.bExitRequestDrawThread_ = false;
+		SB_Marker_Trace(L"  >>>> abort CacheDrawThread");
+		goto end_thread;
+	}
+
+	if (loop_break == eLoopBreak_Restart) {
+		rSBMarker.bRestartRequestDrawThread_ = false;
+		SB_Marker_Trace(L"  >>>> restart CacheDrawThread");
+		goto start_thread;
+	}
+
+end_thread:
+	if (!rSBMarker.bExitRequestDrawThread_) {
+		::PostMessage(pEditView->GetHwnd(), WM_APP_SCRBAR_ENDPAINT, 0, 0);  // 描画終了要求
+	}
+	rSBMarker.bRestartRequestDrawThread_ = false;
+	rSBMarker.bExitRequestDrawThread_ = false;
+	rSBMarker.bDrawThreadRunning_ = false;
+	SB_Marker_Trace(L"  >>> finish SB_Marker_DrawThread %d", rSBMarker.vLines_.size());
+	_endthreadex(0);
+	return 0;
+}
+
+//----------------------
+//
+//----------------------
+CEditView::ScrBarMarker::ScrBarMarker(CEditView *pView)
+	: pEditView_(pView)
+{
+}
+
+//----------------------
+//
+//----------------------
+CEditView::ScrBarMarker::~ScrBarMarker()
+{
+	WaitForBuild(true);
+	WaitForDraw(true);
+}
+
+//----------------------
+// 更新要求
+//----------------------
+void CEditView::ScrBarMarker::CallPaint(int foo)
+{
+	SB_Marker_Trace(L"ScrBarMarker::CallPaint (%d)", foo);
+	if (!bBuildThreadRunning_) {
+		DrawRequest();
+	}
+}
+
+//----------------------
+// クリア
+//----------------------
+void CEditView::ScrBarMarker::Clear(int foo)
+{
+	SB_Marker_Trace(L"ScrBarMarker::Clear (%d)", foo);
+	Build(/*bCacheClear =*/ true, foo);
+}
+
+//----------------------
+// 再構築
+//----------------------
+void CEditView::ScrBarMarker::Build(bool bCacheClear, int foo)
+{
+	if (pEditView_->m_bMiniMap) return;
+	if (CEditApp::getInstance()->m_pcGrepAgent->m_bGrepMode) return;
+
+	/* 垂直スクロールバー */
+	const CLayoutInt	nEofMargin = CLayoutInt(1); // EOFのマージン
+	const CLayoutInt	nAllLines = pEditView_->m_pcEditDoc->m_cLayoutMgr.GetLineCount() + nEofMargin;
+
+	// 行数が変わっていたら強制更新
+	if (nLastLineCount_ != nAllLines) {
+		nLastLineCount_ = nAllLines;
+		bCacheClear = true;
+	}
+
+	// 描画スレッドを中断
+	WaitForDraw(true);
+
+	if (bCacheClear) {
+		WaitForBuild(true);
+
+		// キャッシュをクリア
+		vLines_.clear();
+	}
+
+	// 更新
+	if (vLines_.empty()) {
+		WaitForBuild(true);
+
+		// キャッシュ作成スレッド起動
+		bBuildThreadRunning_ = true;
+		hBuildThread_ = (HANDLE)_beginthreadex(NULL, 0, &SB_Marker_BuildThread, (void *)pEditView_, 0, NULL);
+		::Sleep(10);
+		SB_Marker_Trace(L"ScrBarMarker::Build (%d) start: %d", foo, vLines_.size());
+	}
+	else {
+		if (bBuildThreadRunning_) {
+			// キャッシュ作成中
+			SB_Marker_Trace(L"ScrBarMarker::Build (%d) create wait...", foo);
+			//::WaitForSingleObject(hBuildThread_, INFINITE);
+		}
+		else {
+			// 描画
+			SB_Marker_Trace(L"ScrBarMarker::Build (%d) cache : %d", foo, vLines_.size());
+			DrawRequest();
+		}
+	}
+}
+
+//----------------------
+// 描画リクエスト
+//----------------------
+void CEditView::ScrBarMarker::DrawRequest()
+{
+	nDrawRequestCount_++;
+	SB_Marker_Trace(L"  ? nDrawRequestCount_ = %d", nDrawRequestCount_);
+	::PostMessage(pEditView_->GetHwnd(), WM_APP_SCRBAR_PAINT, 0, 0);
+}
+
+//----------------------
+// 描画
+//----------------------
+void CEditView::ScrBarMarker::Draw()
+{
+	if (pEditView_->m_bMiniMap) return;
+	if (CEditApp::getInstance()->m_pcGrepAgent->m_bGrepMode) return;
+
+	//std::lock_guard<std::mutex> lock(mtxCacheMutex_);
+
+	if (bDrawThreadRunning_) {
+		bRestartRequestDrawThread_ = true;  // やり直し
+		SB_Marker_Trace(L" *** %s: bRestartRequestDrawThread_", _T(__FUNCTION__));
+		return;
+	}
+	if (hDrawThread_ != 0) {
+		::CloseHandle(hDrawThread_);
+		hDrawThread_ = 0;
+		SB_Marker_Trace(L" *** %s: CloseHandle(hDrawThread_)", _T(__FUNCTION__));
+	}
+
+#if 1 // @@ 描画する際にスクロールバーを更新する 20170721 
+	SCROLLINFO si;
+	si.cbSize = sizeof(si);
+	si.fMask = SIF_ALL;
+	::GetScrollInfo(pEditView_->m_hwndVScrollBar, SB_CTL, &si);
+
+	si.cbSize = sizeof(si);
+	si.fMask = SIF_ALL | SIF_DISABLENOSCROLL;
+	::SetScrollInfo(pEditView_->m_hwndVScrollBar, SB_CTL, &si, TRUE);
+#endif // @@
+
+	// スクロールバーの情報を取得
+	sbi_.cbSize = sizeof(sbi_);
+	::GetScrollBarInfo(pEditView_->m_hwndVScrollBar, OBJID_CLIENT, &sbi_);
+
+	// キャッシュ描画スレッド起動
+	bDrawThreadRunning_ = true;
+	hDrawThread_ = (HANDLE)_beginthreadex(NULL, 0, &SB_Marker_DrawThread, (void *)pEditView_, 0, NULL);
+	SB_Marker_Trace(L"ScrBarMarker::Draw start: %d", vLines_.size());
+}
+
+//----------------------
+// 登録
+//----------------------
+bool CEditView::ScrBarMarker::Add(int nLayoutY, uint32_t magic)
+{
+	if (magic == 0) return false;
+
+	if (vLines_.empty()) {
+		vLines_.push_back(nLayoutY | magic); // 空なら先頭に追加
+		SB_Marker_Trace(L"ScrBarMarker::Add, Append first");
+	}
+	else {
+		auto it = vLines_.begin();
+		while (it != vLines_.end()) {
+			if (((*it) & NK_SCRBAR_LINEN_MASK) == nLayoutY) {  // すでに登録されている行がある
+				if ((*it) & magic) {  // すでに登録されているマジック (なにもしない)
+					SB_Marker_Trace(L"ScrBarMarker::Add, Already registered");
+					return true;
+				}
+				else {
+					(*it) |= magic;  // 行は登録済みなのでマジックを追加
+					SB_Marker_Trace(L"ScrBarMarker::Add, Append magic");
+					goto func_end;
+				}
+			}
+			++it;
+		}
+
+		vLines_.push_back(nLayoutY | magic);  // まだないので追加
+		SB_Marker_Trace(L"ScrBarMarker::Add, Append tail");
+	}
+
+func_end:
+	if (magic & NK_SCRBAR_FOUND_MAGIC) {
+		nSearchFoundLine_++;
+	}
+	if (magic & NK_SCRBAR_MARK_MAGIC) {
+		nMarkFoundLine_++;
+	}
+
+	return true;
+}
+
+//----------------------
+// 削除
+//----------------------
+bool CEditView::ScrBarMarker::Del(int nLayoutY, uint32_t magic)
+{
+	bool bDelete = false;
+
+	if (vLines_.empty()) {
+		SB_Marker_Trace(L"ScrBarMarker::Del, Empty");
+		return false;
+	}
+	else {
+		auto it = vLines_.begin();
+		while (it != vLines_.end()) {
+			if (((*it) & NK_SCRBAR_LINEN_MASK) == nLayoutY) {
+				(*it) &= ~magic;  // 指定のマジックを取り除く
+
+				if (((*it) & NK_SCRBAR_MAGIC_MASK) == 0u) {  // マジックがなくなったら要素を削除
+					it = vLines_.erase(it);
+					SB_Marker_Trace(L"ScrBarMarker::Del, Remove line");
+				}
+				else {
+					SB_Marker_Trace(L"ScrBarMarker::Del, Remove magic");
+				}
+
+				bDelete = true;
+				goto func_end;
+			}
+			++it;
+		}
+	}
+
+func_end:
+	if (magic & NK_SCRBAR_FOUND_MAGIC) {
+		nSearchFoundLine_ = std::max(nSearchFoundLine_ - 1, 0);
+	}
+	if (magic & NK_SCRBAR_MARK_MAGIC) {
+		nMarkFoundLine_ = std::max(nMarkFoundLine_ - 1, 0);
+	}
+
+	return bDelete;
+}
+
+//----------------------
+// 検索文字列のある行か確認
+//----------------------
+bool CEditView::ScrBarMarker::IsFoundLine(const CDocLine *pCDocLine)
+{
+	if (pEditView_->m_bCurSrchKeyMark && pCDocLine->GetLengthWithoutEOL() > 0) {
+		int nSearchStart, nSearchEnd;
+		int nResult = pEditView_->IsSearchString(
+			CStringRef(pCDocLine->GetPtr(), pCDocLine->GetLengthWithoutEOL()),
+			CLogicInt(0), &nSearchStart, &nSearchEnd);
+		return !!nResult;
+	}
+	else {
+		return false;
+	}
+}
+
+void CEditView::ScrBarMarker::WaitForBuild(bool abort)
+{
+	if (bBuildThreadRunning_) {
+		if (abort) bExitRequestBuildThread_ = true;  // 中断
+		::WaitForSingleObject(hBuildThread_, INFINITE);
+		bExitRequestBuildThread_ = false;
+		SB_Marker_Trace(L" *** %s: bBuildThreadRunning_", _T(__FUNCTION__));
+	}
+	if (hBuildThread_ != 0) {
+		::CloseHandle(hBuildThread_);
+		hBuildThread_ = 0;
+		SB_Marker_Trace(L" *** %s: CloseHandle(hBuildThread_)", _T(__FUNCTION__));
+	}
+}
+
+void CEditView::ScrBarMarker::WaitForDraw(bool abort)
+{
+	if (bDrawThreadRunning_) {
+		if (abort) bExitRequestDrawThread_ = true;  // 中断
+		::WaitForSingleObject(hDrawThread_, INFINITE);
+		bExitRequestDrawThread_ = false;
+		SB_Marker_Trace(L" *** %s: bDrawThreadRunning_", _T(__FUNCTION__));
+	}
+	if (hDrawThread_ != 0) {
+		::CloseHandle(hDrawThread_);
+		hDrawThread_ = 0;
+		SB_Marker_Trace(L" *** %s: CloseHandle(hDrawThread_)", _T(__FUNCTION__));
+	}
+}
+
+//----------------------
+// 更新要求
+//----------------------
+void CEditView::_SB_Marker_CallPaint(int foo)
+{
+	SBMarker_->CallPaint(foo);
+}
+
+//----------------------
+// クリア
+//----------------------
+void CEditView::_SB_Marker_Clear(int foo)
+{
+	SBMarker_->Clear(foo);
+}
+
+//----------------------
+// 再構築
+//----------------------
+void CEditView::_SB_Marker_Build(bool bCacheClear, int foo)
+{
+	SBMarker_->Build(bCacheClear, foo);
+}
+
+//----------------------
+// 描画リクエスト
+//----------------------
+void CEditView::_SB_Marker_DrawRequest()
+{
+	SBMarker_->DrawRequest();
+}
+
+//----------------------
+// 描画
+//----------------------
+void CEditView::_SB_Marker_Draw()
+{
+	SBMarker_->Draw();
 }

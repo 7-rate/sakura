@@ -29,6 +29,9 @@
 #include "window/CEditWnd.h"
 #include "types/CTypeSupport.h"
 #include <limits.h>
+#include "_main/CAppMode.h"
+#include "CEditApp.h"
+#include "CGrepAgent.h"
 
 /*! スクロールバー作成
 	@date 2006.12.19 ryoji 新規作成（CEditView::Createから分離）
@@ -310,12 +313,15 @@ void CEditView::AdjustScrollBars( BOOL bRedraw )
 			++nVScrollRate;
 		}
 #endif
-
+		BOOL bVRedraw = bRedraw;
+		if (!bRedraw && (m_bMiniMap || CEditApp::getInstance()->m_pcGrepAgent->m_bGrepMode)) {
+			bVRedraw = TRUE;
+		}
 		setScrollInfoIfNeeded(m_hwndVScrollBar,
 							  (Int)nAllLines / nVScrollRate - 1,					/* 全行数 */
 							  (Int)GetTextArea().m_nViewRowNum / nVScrollRate,		/* 表示域の行数 */
 							  (Int)GetTextArea().GetViewTopLine() / nVScrollRate,	/* 表示域の一番上の行(0開始) */
-							  bRedraw
+							  bVRedraw
 		);
 		m_nVScrollRate = nVScrollRate;				/* 垂直スクロールバーの縮尺 */
 		
@@ -330,6 +336,7 @@ void CEditView::AdjustScrollBars( BOOL bRedraw )
 		if( !bEnable ){
 			ScrollAtV( CLayoutInt(0) );
 		}
+		SB_Marker_CallPaint(10000);
 	}
 	if( NULL != m_hwndHScrollBar ){
 		/* 水平スクロールバー */

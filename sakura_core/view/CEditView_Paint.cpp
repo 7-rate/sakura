@@ -142,6 +142,8 @@ void CEditView::Redraw()
 	OnPaint( hdc, &ps, FALSE );
 
 	::ReleaseDC( GetHwnd(), hdc );
+
+	AdjustScrollBars();
 }
 // 2001/06/21 End
 

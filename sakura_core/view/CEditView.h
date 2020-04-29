@@ -65,6 +65,7 @@
 #include "basis/SakuraBasis.h"	// CLogicInt, CLayoutInt
 #include "util/container.h"		// vector_ex
 #include "util/design_template.h"
+#include <process.h>
 
 class CViewFont;
 class CRuler;
@@ -764,6 +765,83 @@ public:
 	CLayoutInt		m_nPageViewBottom;
 
 	DISALLOW_COPY_AND_ASSIGN(CEditView);
+
+public:
+		//! スクロールバーマーカークラス
+		class ScrBarMarker {
+		public:
+			explicit ScrBarMarker(CEditView *pEditView);
+			~ScrBarMarker();
+
+			void CallPaint(int foo);               // 描画要求 foo:マーキング用
+			void Clear(int foo);                   // クリア (再構築要求) foo:マーキング用
+			void Build(bool bCacheClear, int foo); // 再構築 foo:マーキング用
+			void DrawRequest();                    // 描画リクエスト
+			void Draw();                           // 描画
+
+			// 登録・削除
+			bool Add(int nLayoutY, uint32_t magic);
+			bool Del(int nLayoutY, uint32_t magic);
+
+			// 検索文字列のある行か確認
+			bool IsFoundLine(const CDocLine *pCDocLine);
+
+			// スレッドを待つ
+			void WaitForBuild(bool abort = false);
+			void WaitForDraw(bool abort = false);
+
+		public:
+			CEditView *pEditView_ = nullptr;
+
+			int nLastLineCount_ = 0;                    // 最後に更新した時の行数
+			std::vector<uint32_t> vLines_;              // キャッシュ
+
+			std::wstring strKey_;                       // 構築時のキー
+
+			int nSearchFoundLine_ = 0;                  // 見つかった検索行の数
+			int nMarkFoundLine_ = 0;                    // 見つかったブックマーク行の数
+
+			//std::mutex mtxCacheMutex_;
+			HANDLE hBuildThread_ = 0;                   // キャッシュ作成スレッドハンドル
+			bool   bBuildThreadRunning_ = false;        //   スレッド稼働状態
+			bool   bExitRequestBuildThread_ = false;    //   スレッド終了リクエスト
+
+			HANDLE hDrawThread_ = 0;                    // キャッシュ描画スレッドハンドル
+			bool   bDrawThreadRunning_ = false;         //   スレッド稼働状態
+			bool   bExitRequestDrawThread_ = false;     //   スレッド終了リクエスト
+			bool   bRestartRequestDrawThread_ = false;  //   描画やり直しリクエスト
+			int    nDrawRequestCount_ = 0;              //   描画リクエスト回数
+
+			SCROLLBARINFO sbi_;
+		};
+
+		std::unique_ptr<ScrBarMarker> SBMarker_;
+
+		void _SB_Marker_CallPaint(int foo);               // 描画要求 foo:マーキング用
+		void _SB_Marker_Clear(int foo);                   // クリア (再構築要求) foo:マーキング用
+		void _SB_Marker_Build(bool bCacheClear, int foo); // 再構築 foo:マーキング用
+		void _SB_Marker_DrawRequest();                    // 描画リクエスト
+		void _SB_Marker_Draw();                           // 描画
+
+		// トレース用マクロ
+		#define SCRBAR_MARKCACHE_TRACE  (0)
+		#if SCRBAR_MARKCACHE_TRACE
+			#define SB_Marker_Trace(...)              si::logln(__VA_ARGS__);
+			#define SB_Marker_CallPaint(foo)          _SB_Marker_CallPaint(foo); DebugOutputCaller("    <- Caller, CallPaint")
+			#define SB_Marker_Clear(foo)              _SB_Marker_Clear(foo); DebugOutputCaller("    <- Caller, Clear")
+			#define SB_Marker_Build(bCacheClear, foo) _SB_Marker_Build(bCacheClear, foo); DebugOutputCaller("    <- Caller, Build")
+			#define SB_Marker_DrawRequest()           _SB_Marker_DrawRequest(); DebugOutputCaller("    <- Caller, DrawRequest")
+			#define SB_Marker_Draw()                  _SB_Marker_Draw(); DebugOutputCaller("    <- Caller, Draw")
+		#else
+			#define SB_Marker_Trace(...)              
+			#define SB_Marker_CallPaint(foo)          _SB_Marker_CallPaint(foo)
+			#define SB_Marker_Clear(foo)              _SB_Marker_Clear(foo)
+			#define SB_Marker_Build(bCacheClear, foo) _SB_Marker_Build(bCacheClear, foo)
+			#define SB_Marker_DrawRequest()           _SB_Marker_DrawRequest()
+			#define SB_Marker_Draw()                  _SB_Marker_Draw()
+		#endif
+
+		CKetaXInt nMaxLineKetas_ = 0;  // 前更新時の折り返し桁数
 };
 
 class COutputAdapter

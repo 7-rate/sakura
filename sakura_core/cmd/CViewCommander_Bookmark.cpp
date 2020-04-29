@@ -18,6 +18,9 @@
 #include "CViewCommander_inline.h"
 #include "docplus/CFuncListManager.h"
 
+#define NK_SCRBAR_FOUND_MAGIC (0x10000000)  // 検索
+#define NK_SCRBAR_MARK_MAGIC  (0x20000000)  // ブックマーク
+
 //	from CViewCommander_New.cpp
 /*!	検索開始位置へ戻る
 	@author	ai
@@ -267,12 +270,42 @@ void CViewCommander::Command_BOOKMARK_SET(void)
 			pCDocLine=GetDocument()->m_cDocLineMgr.GetLine( nY );
 			CBookmarkSetter cBookmark(pCDocLine);
 			if(pCDocLine)cBookmark.SetBookmark(!cBookmark.IsBookmarked());
+			if (pCDocLine) {
+				// レイアウト行
+				CLogicInt nLogicY = nY;
+				CLogicPoint ptXY = { 0, nLogicY };
+				CLayoutPoint ptLayout;
+				GetDocument()->m_cLayoutMgr.LogicToLayout(ptXY, &ptLayout, nLogicY);
+
+				if (cBookmark.IsBookmarked()) {
+					m_pCommanderView->SBMarker_->Add(ptLayout.y, NK_SCRBAR_MARK_MAGIC);  // 登録
+				}
+				else {
+					m_pCommanderView->SBMarker_->Del(ptLayout.y, NK_SCRBAR_MARK_MAGIC);  // 削除
+				}
+				m_pCommanderView->SB_Marker_CallPaint(4001);
+			}
 		}
 	}
 	else{
 		pCDocLine=GetDocument()->m_cDocLineMgr.GetLine( GetCaret().GetCaretLogicPos().GetY2() );
 		CBookmarkSetter cBookmark(pCDocLine);
 		if(pCDocLine)cBookmark.SetBookmark(!cBookmark.IsBookmarked());
+		if (pCDocLine) {
+			// レイアウト行
+			CLogicInt nLogicY = GetCaret().GetCaretLogicPos().GetY2();
+			CLogicPoint ptXY = { 0, nLogicY };
+			CLayoutPoint ptLayout;
+			GetDocument()->m_cLayoutMgr.LogicToLayout(ptXY, &ptLayout, nLogicY);
+
+			if (cBookmark.IsBookmarked()) {
+				m_pCommanderView->SBMarker_->Add(ptLayout.y, NK_SCRBAR_MARK_MAGIC);  // 登録
+			}
+			else {
+				m_pCommanderView->SBMarker_->Del(ptLayout.y, NK_SCRBAR_MARK_MAGIC);  // 削除
+			}
+			m_pCommanderView->SB_Marker_CallPaint(4002);
+		}
 	}
 
 	// 2002.01.16 hor 分割したビューも更新
@@ -367,6 +400,7 @@ re_do:;								// hor
 void CViewCommander::Command_BOOKMARK_RESET(void)
 {
 	CBookmarkManager(&GetDocument()->m_cDocLineMgr).ResetAllBookMark();
+	m_pCommanderView->SB_Marker_Clear(203);
 	// 2002.01.16 hor 分割したビューも更新
 	GetEditWindow()->Views_Redraw();
 }

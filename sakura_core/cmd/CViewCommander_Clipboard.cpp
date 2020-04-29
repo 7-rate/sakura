@@ -597,6 +597,7 @@ void CViewCommander::Command_INSTEXT(
 	}
 
 end_of_func:
+	m_pCommanderView->SB_Marker_Clear(2000);
 
 	return;
 }
