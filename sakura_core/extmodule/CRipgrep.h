@@ -22,32 +22,21 @@
 		3. This notice may not be removed or altered from any source
 		   distribution.
 */
+#pragma once
 
-#include "StdAfx.h"
-#include "GrepInfo.h"
+#define RIPGREP_COMMAND L"rg.exe"
 
-/*!
- * コンストラクタ
- */
-GrepInfo::GrepInfo() noexcept
-	: cmGrepKey()
-	, cmGrepRep()
-	, cmGrepFile()
-	, cmGrepFolder()
-	, sGrepSearchOption()
-	, bGrepCurFolder(false)
-	, bGrepStdout(false)
-	, bGrepHeader(true)
-	, bGrepSubFolder(false)
-	, nGrepCharSet(CODE_SJIS)
-	, nGrepOutputStyle(1)
-	, nGrepOutputLineType(0)
-	, bGrepOutputFileOnly(false)
-	, bGrepOutputBaseFolder(false)
-	, bGrepSeparateFolder(false)
-	, bGrepReplace(false)
-	, bGrepPaste(false)
-	, bGrepBackup(false)
-	, bUseRipgrep(false)
-{
-}
+class CRipgrep{
+public:
+	CRipgrep();
+	virtual ~CRipgrep();
+
+protected:
+
+
+private:
+
+};
+
+bool ExistRipgrep();
+

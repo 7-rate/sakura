@@ -6,8 +6,8 @@
 	warranty. In no event will the authors be held liable for any damages
 	arising from the use of this software.
 
-	Permission is granted to anyone to use this software for any purpose,
-	including commercial applications, and to alter it and redistribute it
+	Permission is granted to anyone to use this software for any purpose, 
+	including commercial applications, and to alter it and redistribute it 
 	freely, subject to the following restrictions:
 
 		1. The origin of this software must not be misrepresented;
@@ -16,7 +16,7 @@
 		   in the product documentation would be appreciated but is
 		   not required.
 
-		2. Altered source versions must be plainly marked as such,
+		2. Altered source versions must be plainly marked as such, 
 		   and must not be misrepresented as being the original software.
 
 		3. This notice may not be removed or altered from any source
@@ -24,30 +24,32 @@
 */
 
 #include "StdAfx.h"
-#include "GrepInfo.h"
+#include <string>
+#include <stdio.h>
+#include <string.h>
+#include "CRipgrep.h"
+#include "charset/charcode.h"
+#include "env/CShareData.h"
+#include "env/DLLSHAREDATA.h"
 
-/*!
- * コンストラクタ
- */
-GrepInfo::GrepInfo() noexcept
-	: cmGrepKey()
-	, cmGrepRep()
-	, cmGrepFile()
-	, cmGrepFolder()
-	, sGrepSearchOption()
-	, bGrepCurFolder(false)
-	, bGrepStdout(false)
-	, bGrepHeader(true)
-	, bGrepSubFolder(false)
-	, nGrepCharSet(CODE_SJIS)
-	, nGrepOutputStyle(1)
-	, nGrepOutputLineType(0)
-	, bGrepOutputFileOnly(false)
-	, bGrepOutputBaseFolder(false)
-	, bGrepSeparateFolder(false)
-	, bGrepReplace(false)
-	, bGrepPaste(false)
-	, bGrepBackup(false)
-	, bUseRipgrep(false)
+
+CRipgrep::CRipgrep()
 {
+}
+
+CRipgrep::~CRipgrep()
+{
+}
+
+
+//rg.exeの存在チェック
+bool ExistRipgrep()
+{
+	WCHAR cmdline[1024];
+	WCHAR szExeFolder[_MAX_PATH + 1];
+
+	GetExedir( cmdline, RIPGREP_COMMAND );
+	SplitPath_FolderAndFile( cmdline, szExeFolder, NULL );
+
+	return ( (DWORD)-1 != ::GetFileAttributes( cmdline ) );
 }
