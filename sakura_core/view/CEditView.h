@@ -773,11 +773,11 @@ public:
 			explicit ScrBarMarker(CEditView *pEditView);
 			~ScrBarMarker();
 
-			void CallPaint(int foo);               // 描画要求 foo:マーキング用
-			void Clear(int foo);                   // クリア (再構築要求) foo:マーキング用
-			void Build(bool bCacheClear, int foo); // 再構築 foo:マーキング用
-			void DrawRequest();                    // 描画リクエスト
-			void Draw();                           // 描画
+			void CallPaint();               // 描画要求 
+			void Clear();                   // クリア (再構築要求) 
+			void Build(bool bCacheClear);   // 再構築 
+			void DrawRequest();             // 描画リクエスト
+			void Draw();                    // 描画
 
 			// 登録・削除
 			bool Add(int nLayoutY, uint32_t magic);
@@ -817,29 +817,11 @@ public:
 
 		std::unique_ptr<ScrBarMarker> SBMarker_;
 
-		void _SB_Marker_CallPaint(int foo);               // 描画要求 foo:マーキング用
-		void _SB_Marker_Clear(int foo);                   // クリア (再構築要求) foo:マーキング用
-		void _SB_Marker_Build(bool bCacheClear, int foo); // 再構築 foo:マーキング用
-		void _SB_Marker_DrawRequest();                    // 描画リクエスト
-		void _SB_Marker_Draw();                           // 描画
-
-		// トレース用マクロ
-		#define SCRBAR_MARKCACHE_TRACE  (0)
-		#if SCRBAR_MARKCACHE_TRACE
-			#define SB_Marker_Trace(...)              si::logln(__VA_ARGS__);
-			#define SB_Marker_CallPaint(foo)          _SB_Marker_CallPaint(foo); DebugOutputCaller("    <- Caller, CallPaint")
-			#define SB_Marker_Clear(foo)              _SB_Marker_Clear(foo); DebugOutputCaller("    <- Caller, Clear")
-			#define SB_Marker_Build(bCacheClear, foo) _SB_Marker_Build(bCacheClear, foo); DebugOutputCaller("    <- Caller, Build")
-			#define SB_Marker_DrawRequest()           _SB_Marker_DrawRequest(); DebugOutputCaller("    <- Caller, DrawRequest")
-			#define SB_Marker_Draw()                  _SB_Marker_Draw(); DebugOutputCaller("    <- Caller, Draw")
-		#else
-			#define SB_Marker_Trace(...)              
-			#define SB_Marker_CallPaint(foo)          _SB_Marker_CallPaint(foo)
-			#define SB_Marker_Clear(foo)              _SB_Marker_Clear(foo)
-			#define SB_Marker_Build(bCacheClear, foo) _SB_Marker_Build(bCacheClear, foo)
-			#define SB_Marker_DrawRequest()           _SB_Marker_DrawRequest()
-			#define SB_Marker_Draw()                  _SB_Marker_Draw()
-		#endif
+		void SB_Marker_CallPaint();             // 描画要求 
+		void SB_Marker_Clear();                 // クリア (再構築要求) 
+		void SB_Marker_Build(bool bCacheClear); // 再構築 
+		void SB_Marker_DrawRequest();           // 描画リクエスト
+		void SB_Marker_Draw();                  // 描画
 
 		CKetaXInt nMaxLineKetas_ = 0;  // 前更新時の折り返し桁数
 };

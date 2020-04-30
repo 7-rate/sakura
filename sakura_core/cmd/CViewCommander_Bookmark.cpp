@@ -283,7 +283,7 @@ void CViewCommander::Command_BOOKMARK_SET(void)
 				else {
 					m_pCommanderView->SBMarker_->Del(ptLayout.y, NK_SCRBAR_MARK_MAGIC);  // 削除
 				}
-				m_pCommanderView->SB_Marker_CallPaint(4001);
+				m_pCommanderView->SB_Marker_CallPaint();
 			}
 		}
 	}
@@ -304,7 +304,7 @@ void CViewCommander::Command_BOOKMARK_SET(void)
 			else {
 				m_pCommanderView->SBMarker_->Del(ptLayout.y, NK_SCRBAR_MARK_MAGIC);  // 削除
 			}
-			m_pCommanderView->SB_Marker_CallPaint(4002);
+			m_pCommanderView->SB_Marker_CallPaint();
 		}
 	}
 
@@ -400,7 +400,7 @@ re_do:;								// hor
 void CViewCommander::Command_BOOKMARK_RESET(void)
 {
 	CBookmarkManager(&GetDocument()->m_cDocLineMgr).ResetAllBookMark();
-	m_pCommanderView->SB_Marker_Clear(203);
+	m_pCommanderView->SB_Marker_Clear();
 	// 2002.01.16 hor 分割したビューも更新
 	GetEditWindow()->Views_Redraw();
 }

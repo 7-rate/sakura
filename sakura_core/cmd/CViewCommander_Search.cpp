@@ -323,7 +323,7 @@ end_of_func:;
 		}
 	}
 	if (bSBClear) {
-		m_pCommanderView->SB_Marker_Clear(801);
+		m_pCommanderView->SB_Marker_Clear();
 	}
 }
 
@@ -483,7 +483,7 @@ end_of_func:;
 		);
 	}
 	if (bSBClear) {
-		m_pCommanderView->SB_Marker_Clear(802);
+		m_pCommanderView->SB_Marker_Clear();
 	}
 
 	return;
@@ -1544,7 +1544,7 @@ void CViewCommander::Command_SEARCH_CLEARMARK( void )
 
 		// 再描画
 		m_pCommanderView->RedrawAll();
-		m_pCommanderView->SB_Marker_Clear(301);
+		m_pCommanderView->SB_Marker_Clear();
 
 		return;
 	}
@@ -1555,7 +1555,7 @@ void CViewCommander::Command_SEARCH_CLEARMARK( void )
 	m_pCommanderView->m_bCurSrchKeyMark = false;	/* 検索文字列のマーク */
 	/* フォーカス移動時の再描画 */
 	m_pCommanderView->RedrawAll();
-	m_pCommanderView->SB_Marker_Clear(302);
+	m_pCommanderView->SB_Marker_Clear();
 
 	return;
 }

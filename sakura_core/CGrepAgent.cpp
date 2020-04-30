@@ -880,7 +880,7 @@ DWORD CGrepAgent::DoGrepSakura(
 	}
 	pcViewDst->GetDocument()->m_cDocEditor.m_pcOpeBlk->AddRef();
 
-	pcViewDst->SB_Marker_CallPaint(100);
+	pcViewDst->SB_Marker_CallPaint();
 	pcViewDst->m_bCurSrchKeyMark = true;								/* 検索文字列のマーク */
 	pcViewDst->m_strCurSearchKey = pcmGrepKey->GetStringPtr();				/* 検索文字列 */
 	pcViewDst->m_sCurSearchOption = sSearchOption;						// 検索オプション

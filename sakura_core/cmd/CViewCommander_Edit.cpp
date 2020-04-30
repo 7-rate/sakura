@@ -731,7 +731,7 @@ void CViewCommander::Command_REDO( void )
 				}
 			}
 		}
-		m_pCommanderView->SB_Marker_Clear(1000);
+		m_pCommanderView->SB_Marker_Clear();
 		m_pCommanderView->SetDrawSwitch(bDrawSwitchOld); // 2007.07.22 ryoji
 		m_pCommanderView->AdjustScrollBars(); // 2007.07.22 ryoji
 		if (!bDraw) {

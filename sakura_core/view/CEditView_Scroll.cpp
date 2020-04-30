@@ -336,7 +336,7 @@ void CEditView::AdjustScrollBars( BOOL bRedraw )
 		if( !bEnable ){
 			ScrollAtV( CLayoutInt(0) );
 		}
-		SB_Marker_CallPaint(10000);
+		SB_Marker_CallPaint();
 	}
 	if( NULL != m_hwndHScrollBar ){
 		/* 水平スクロールバー */

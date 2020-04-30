@@ -349,15 +349,13 @@ void CEditView::InsertData_CEditView(
 		pCDocLine = m_pcEditDoc->m_cDocLineMgr.GetLine(ptLogic.y);
 		if (SBMarker_->IsFoundLine(pCDocLine)) {
 			SBMarker_->Add(pptNewPos->y, NK_SCRBAR_FOUND_MAGIC);
-			SB_Marker_Trace(L"SBMarker_::Add 703");
 		}
 		else {
 			SBMarker_->Del(pptNewPos->y, NK_SCRBAR_FOUND_MAGIC);
-			SB_Marker_Trace(L"SBMarker_::Del 703");
 		}
 	}
 	else {
-		SB_Marker_Clear(703);
+		SB_Marker_Clear();
 	}
 }
 
@@ -450,7 +448,7 @@ void CEditView::DeleteData2(
 		// 操作の追加
 		m_cCommander.GetOpeBlk()->AppendOpe( pcOpe );
 	}
-	SB_Marker_Clear(700);  // キャッシュのクリア
+	SB_Marker_Clear();  // キャッシュのクリア
 }
 
 /*!	カーソル位置または選択エリアを削除
@@ -676,7 +674,7 @@ void CEditView::DeleteData(
 		}
 	}
 end_of_func:;
-	SB_Marker_Clear(701);  // キャッシュのクリア
+	SB_Marker_Clear();  // キャッシュのクリア
 
 	return;
 }
