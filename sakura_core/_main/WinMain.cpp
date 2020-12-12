@@ -45,7 +45,7 @@
 #endif
 
 #ifdef DEV_VERSION
-#define _APP_NAME_DEV_(TYPE) TYPE("(dev Version)")
+#define _APP_NAME_DEV_(TYPE) TYPE("")
 #else
 #define _APP_NAME_DEV_(TYPE) TYPE("")
 #endif
